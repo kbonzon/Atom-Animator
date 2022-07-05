@@ -19,6 +19,22 @@ from bpy.types import GPencilFrame
 from bpy.props import StringProperty, BoolProperty, EnumProperty
 from bpy.types import Operator
 
+class CreatorPanel(bpy.types.Panel):
+    bl_label = "Compound Creator"
+    bl_idname = "PT_CompoundPanel"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Compound Creator'
+    
+    def draw (self, context):
+        layout = self.layout
+        
+        row = layout.row()
+        row.label(text="Add Compound", icon='OUTLINER_OB_POINTCLOUD')
+        row = layout.row()
+        row.operator("import_cml.compound_data",icon='OUTLINER_DATA_POINTCLOUD')
+
+
 def add_black_mat():
     mat = bpy.data.materials.get("Black")
     
@@ -159,7 +175,7 @@ def addBond(atom1, atom2, name, order):
     bpy.ops.object.posemode_toggle()
     
 def read_cml_file(context, filepath, use_some_setting):
-    print("running read_some_data...")
+    print("reading file...")
     f = open(filepath, 'r', encoding='utf-8')
     data = f.readline()
     
@@ -221,7 +237,7 @@ def read_cml_file(context, filepath, use_some_setting):
 
 class ImportCML(Operator, ImportHelper):
     """This appears in the tooltip of the operator and in the generated docs"""
-    bl_idname = "import_test.some_data"  # important since its how bpy.ops.import_test.some_data is constructed
+    bl_idname = "import_cml.compound_data"  # important since its how bpy.ops.import_test.some_data is constructed
     bl_label = "Import CML File"
 
     # ImportHelper mixin class uses this
@@ -262,11 +278,13 @@ def menu_func_import(self, context):
 
 # Register and add to the "file selector" menu (required to use F3 search "Text Import Operator" for quick access)
 def register():
+    bpy.utils.register_class(CreatorPanel)
     bpy.utils.register_class(ImportCML)
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
 
 
 def unregister():
+    bpy.utils.unregister_class(CreatorPanel)
     bpy.utils.unregister_class(ImportCML)
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
 
