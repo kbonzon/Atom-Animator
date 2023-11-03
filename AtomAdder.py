@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Compound Creator",
     "author": "Tim Bonzon",
-    "version": (1, 0),
+    "version": (1.2, 1.2),
     "blender": (2, 80, 0),
     "location": "View3d > Toolbar",
     "description": "Adds a chemical compound from CML file",
@@ -33,6 +33,12 @@ class CreatorPanel(bpy.types.Panel):
         row.label(text="Add Compound", icon='OUTLINER_OB_POINTCLOUD')
         row = layout.row()
         row.operator("import_cml.compound_data",icon='OUTLINER_DATA_POINTCLOUD')
+        
+def find_collection (collection):
+    for col in bpy.data.collections:
+            if col.name == collection:
+                    return True
+    return False
 
 
 def add_black_mat():
@@ -61,10 +67,21 @@ def add_white_mat():
 
 def addAtom(x,y,atom,id):
     
+    #grabbing the right collection
+    if find_collection (atom) == False:
+        atom_collection = bpy.data.collections.new(atom)
+        bpy.context.scene.collection.children.link(atom_collection)
+    else:
+        atom_collection = bpy.data.collections[atom]
+    
+    #grabbing the master collection
+    
+    master_collection = bpy.context.scene.collection
+    
     #adding the text
     
     bpy.ops.object.text_add(enter_editmode=True, align='WORLD', location=(x, 0, y + 4), rotation=(1.5707,0,0), scale=(0.01, 0.01, 0.01))
-    bpy.context.object.data.size = 0.5
+    bpy.context.active_object.data.size = 0.5
     bpy.context.active_object.name = id
     
     #Setting the atom text    
@@ -83,12 +100,26 @@ def addAtom(x,y,atom,id):
     
     bpy.ops.mesh.primitive_circle_add(radius=0.25, fill_type='NGON', enter_editmode=False, align='WORLD', location=(0,0,-0.05), scale=(1, 1, 1))
     halo = bpy.context.active_object
+    atom_collection.objects.link(halo)
+    master_collection.objects.unlink(halo)
     halo.parent = text
     halo.name = id + "_halo"
     
     #assigning a white material to halo
     
     halo.data.materials.append(add_white_mat())
+    
+    #Adding an empty to act as a handle
+    
+    #handle = bpy.ops.object.empty_add(type='SPHERE', align='WORLD', location=(x, 0, y + 4), scale=(1, 1, 1))
+    
+    #adding the object to the atom collection
+    
+    atom_collection.objects.link(text)
+    master_collection.objects.unlink(text)
+
+    
+    #text.parent = handle
     
     print("Added atom " + id)
 
@@ -103,28 +134,47 @@ def draw_line(gp_frame, p0 : tuple, p1 : tuple):
 
 def addBond(atom1, atom2, name, order):
     
+     #grabbing the master collection
+    
+    master_collection = bpy.context.scene.collection
+    
+    #finding bond collection
+    
+    col_name = "bonds"
+    
+    if find_collection (col_name) == False:
+        bond_collection = bpy.data.collections.new(col_name)
+        bpy.context.scene.collection.children.link(bond_collection)
+    else:
+        bond_collection = bpy.data.collections[col_name]
+    
     #Creating Armature and bond plane
     
-    bondName = name
+    bondName = atom1+ "_" + atom2 + "_" + name[0]
     planeName = name + "_bondPlane"
     bpy.ops.object.armature_add(enter_editmode=True, align='WORLD', location=(0, 0, 0), scale=(1, 1, 1))
-    bpy.context.active_object.name = bondName
+    armature = bpy.context.active_object
+    armature.name = bondName
     bpy.ops.armature.select_all(action='SELECT')
-    bpy.ops.armature.duplicate_move(ARMATURE_OT_duplicate={"do_flip_names":False}, TRANSFORM_OT_translate={"value":(1, 0, 0), "orient_axis_ortho":'X', "orient_type":'GLOBAL', "orient_matrix":((1, 0, 0), (0, 1, 0), (0, 0, 1)), "orient_matrix_type":'GLOBAL', "constraint_axis":(True, False, False), "mirror":False, "use_proportional_edit":False, "proportional_edit_falloff":'SMOOTH', "proportional_size":1, "use_proportional_connected":False, "use_proportional_projected":False, "snap":False, "snap_target":'CLOSEST', "snap_point":(0, 0, 0), "snap_align":False, "snap_normal":(0, 0, 0), "gpencil_strokes":False, "cursor_transform":False, "texture_space":False, "remove_on_cancel":False, "view2d_edge_pan":False, "release_confirm":False, "use_accurate":False, "use_automerge_and_split":False})
+    bpy.ops.armature.duplicate_move(ARMATURE_OT_duplicate={"do_flip_names":False}, TRANSFORM_OT_translate={"value":(1, 0, 0), "orient_type":'GLOBAL', "orient_matrix":((1, 0, 0), (0, 1, 0), (0, 0, 1)), "orient_matrix_type":'GLOBAL', "constraint_axis":(True, False, False), "mirror":False, "use_proportional_edit":False, "proportional_edit_falloff":'SMOOTH', "proportional_size":1, "use_proportional_connected":False, "use_proportional_projected":False, "snap":False, "snap_elements":{'INCREMENT'}, "use_snap_project":False, "snap_target":'CLOSEST', "use_snap_self":True, "use_snap_edit":True, "use_snap_nonedit":True, "use_snap_selectable":False, "snap_point":(0, 0, 0), "snap_align":False, "snap_normal":(0, 0, 0), "gpencil_strokes":False, "cursor_transform":False, "texture_space":False, "remove_on_cancel":False, "view2d_edge_pan":False, "release_confirm":False, "use_accurate":False, "use_automerge_and_split":False})
     bpy.ops.object.editmode_toggle()
     bpy.ops.object.gpencil_add(location=(0, 0, 0), type='EMPTY')
     bpy.context.active_object.name = planeName
     bondStroke = bpy.context.scene.objects[planeName]
     gpencil_layer = bondStroke.data.layers.new(name, set_active=True)
+    gpencil_layer.location[1] = 0.08
     frame = gpencil_layer.frames.new(0)
-    bpy.context.object.data.layers[bondName].location[1] = 0.1
+    #armature.object.data.location += 0.1a
+    
+    #Handling higher order bonds by drawing them off center
     if order <= 1: 
         draw_line(frame, (0,0,0),(1,0,0))
     else:
         x = 1
         for x in range(1, order + 1):
             draw_line(frame, (0,0,(x*0.1)-0.20),(1,0,(x*0.1)-0.20))
-    bpy.context.object.data.layers[bondName].line_change = 50
+            
+    gpencil_layer.line_change = 50
     
     
     bondPlane = bpy.data.objects[planeName]
@@ -154,6 +204,7 @@ def addBond(atom1, atom2, name, order):
     bpy.context.view_layer.objects[bondName].data.bones.active = bone1
     bone1.select = True
     bpy.ops.pose.constraint_add(type='COPY_LOCATION')
+    print("atom1 name is " + atom1)
     bpy.context.object.pose.bones["Bone"].constraints["Copy Location"].target = bpy.data.objects[atom1]
     bpy.ops.pose.constraint_add(type='TRACK_TO')
     bpy.context.object.pose.bones["Bone"].constraints["Track To"].target = bpy.data.objects[bondName]
@@ -174,9 +225,17 @@ def addBond(atom1, atom2, name, order):
     
     bpy.ops.object.posemode_toggle()
     
+    bond_collection.objects.link(bondPlane)
+    bond_collection.objects.link(bondArma)
+    master_collection.objects.unlink(bondPlane)
+    master_collection.objects.unlink(bondArma)
+    
 def read_cml_file(context, filepath, use_some_setting):
     print("reading file...")
     f = open(filepath, 'r', encoding='utf-8')
+    fname_tmp = f.name
+    fname_tmp1 = fname_tmp.split("\\",-1)
+    fname = fname_tmp1[2]
     data = f.readline()
     
     while data != "</molecule>\n" :
@@ -186,12 +245,12 @@ def read_cml_file(context, filepath, use_some_setting):
              
              atom1_tmp = data.split("atomRefs2=\"", 1)
              atom1_tmp2 = atom1_tmp[1].split()
-             atom1 = atom1_tmp2[0]
+             atom1 = atom1_tmp2[0] + fname
              
              atom2_tmp = data.split("\" i", 1)
              atom2_tmp2 = atom2_tmp[0].split()
              atom2_tmp3 = atom1_tmp2[1].split("\"",1)
-             atom2 = atom2_tmp3[0]
+             atom2 = atom2_tmp3[0] + fname
              
              #Second, find the name of the bond
              
@@ -226,7 +285,7 @@ def read_cml_file(context, filepath, use_some_setting):
              y_tmp2 = y_tmp[1].split("\"", 1)
              y_pos = y_tmp2[0]
              y_pos = float(y_pos) * 0.5
-             addAtom(x_pos, y_pos,atom,id)
+             addAtom(x_pos, y_pos,atom,id+fname)
              print(x_pos, " ,", y_pos)
          data = f.readline()
     f.close()
