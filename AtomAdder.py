@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Compound Creator",
     "author": "Tim Bonzon",
-    "version": (1.2, 1.2),
+    "version": (1.3, 1.3),
     "blender": (2, 80, 0),
     "location": "View3d > Toolbar",
     "description": "Adds a chemical compound from CML file",
@@ -65,7 +65,7 @@ def add_white_mat():
     
     return mat
 
-def addAtom(x,y,atom,id):
+def addAtom(x,y,atom,id, hydrogens=0):
     
     #grabbing the right collection
     if find_collection (atom) == False:
@@ -74,6 +74,9 @@ def addAtom(x,y,atom,id):
     else:
         atom_collection = bpy.data.collections[atom]
     
+    if hydrogens > 1:
+        atom = atom + "H"    
+
     #grabbing the master collection
     
     master_collection = bpy.context.scene.collection
@@ -239,6 +242,7 @@ def read_cml_file(context, filepath, use_some_setting):
     data = f.readline()
     
     while data != "</molecule>\n" :
+         print(f"current line ={data}")
          if "bond atomRefs2=" in data:
              
              #First, find the atoms involved in the bond
@@ -269,15 +273,23 @@ def read_cml_file(context, filepath, use_some_setting):
              
          if "atom elementType" in data:
              atom = data[19]
+             print("Is this even working?")
              id_tmp = data.split("id=\"", 1)
              id_tmp2 = id_tmp[1].split("\"",1)
              id = id_tmp2[0]
-             
+             count = 0
+             	                    
              if "hydrogenCount" in data:
+                 count_tmp = data.split("hydrogenCount=\"", 1)
+                 count = int(count_tmp[0])
+                 print(f"count={count}")
                  print("Hydrogens need to be handled")
+                 break
             
              x_tmp = data.split("x2=\"",1)
-             x_tmp2 = x_tmp[1].split("\" ", 1)
+             print(f"x_tmp={x_tmp}")
+             x_tmp2 = x_tmp[1].split("\"", 1)
+             print(f"x_tmp2={x_tmp2}")
              x_pos = x_tmp2[0]
              x_pos = (float(x_pos) * 0.5) - 5
 
@@ -285,8 +297,9 @@ def read_cml_file(context, filepath, use_some_setting):
              y_tmp2 = y_tmp[1].split("\"", 1)
              y_pos = y_tmp2[0]
              y_pos = float(y_pos) * 0.5
-             addAtom(x_pos, y_pos,atom,id+fname)
+             addAtom(x_pos, y_pos,atom,id+fname, count)
              print(x_pos, " ,", y_pos)
+             
          data = f.readline()
     f.close()
     # would normally load the data here
