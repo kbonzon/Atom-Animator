@@ -12,6 +12,9 @@ bl_info = {
 
 import bpy
 import math
+import bmesh
+import mathutils
+from mathutils import Vector
 # ImportHelper is a helper class, defines filename and
 # invoke() function which calls the file selector.
 from bpy_extras.io_utils import ImportHelper
@@ -34,14 +37,14 @@ class CreatorPanel(bpy.types.Panel):
         row = layout.row()
         row.operator("import_cml.compound_data",icon='OUTLINER_DATA_POINTCLOUD')
         
-def find_collection (collection):
+def findCollection (collection):
     for col in bpy.data.collections:
             if col.name == collection:
                     return True
     return False
 
 
-def add_black_mat():
+def addBlackMaterial():
     mat = bpy.data.materials.get("Black")
     
     if mat is None:
@@ -53,7 +56,7 @@ def add_black_mat():
     
     return mat
     
-def add_white_mat():
+def addWhiteMaterial():
     mat = bpy.data.materials.get("White")
     
     if mat is None:
@@ -65,10 +68,40 @@ def add_white_mat():
     
     return mat
 
+def makeHalo(name, radius=1.0, segments=32, location=(0,0,0)):
+    mesh = bpy.data.meshes.new("Halo")
+    obj = bpy.data.objects.new(name, mesh)
+    
+    bm = bmesh.new()
+
+    center = bm.verts.new(Vector(location))
+
+    verts = []
+    for i in range (segments):
+        angle = 2  * math.pi * i/ segments
+        x = location[0] + radius * math.cos(angle)
+        y = location[1] + radius * math.sin(angle)
+        z = location[2]
+        v = bm.verts.new((x,y,z))
+        
+        verts.append(v)
+
+    bm.verts.ensure_lookup_table()
+
+    for i in range(segments):
+        v1 = verts[i]
+        v2 = verts[(i+1) % segments]
+        bm.faces.new([center, v1, v2])
+
+    bm.to_mesh(mesh)
+    bm.free()
+
+    bpy.context.collection.objects.link(obj)
+
 def addAtom(x,y,atom,id, hydrogens=0):
     
     #grabbing the right collection
-    if find_collection (atom) == False:
+    if findCollection (atom) == False:
         atom_collection = bpy.data.collections.new(atom)
         bpy.context.scene.collection.children.link(atom_collection)
     else:
@@ -83,34 +116,40 @@ def addAtom(x,y,atom,id, hydrogens=0):
     
     #adding the text
     
-    bpy.ops.object.text_add(enter_editmode=True, align='WORLD', location=(x, 0, y + 4), rotation=(1.5707,0,0), scale=(0.01, 0.01, 0.01))
-    bpy.context.active_object.data.size = 0.5
-    bpy.context.active_object.name = id
+    t = bpy.data.curves.new(name=id, type="FONT")
+    t.body = atom
+    t.size = 0.5
+    t.materials.append(addBlackMaterial())
+    t.align_x = "CENTER"
+    t.align_y = "CENTER"
+    t_o = bpy.data.objects.new(id, t)
+    t_o.location = [x, y, 0]
+    bpy.context.scene.collection.objects.link(t_o)
     
     #Setting the atom text    
 
-    bpy.ops.font.delete(type='PREVIOUS_WORD')
-    bpy.ops.font.text_insert(text=atom)
-    bpy.ops.object.mode_set(mode='OBJECT', toggle=True)
-    bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='MEDIAN')
+    # bpy.ops.font.delete(type='PREVIOUS_WORD')
+    # bpy.ops.font.text_insert(text=atom)
+    # bpy.ops.object.mode_set(mode='OBJECT', toggle=True)
+    # bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='MEDIAN')
     
-    #assigning a black material
+    # #assigning a black material
     
     text = bpy.context.active_object
-    text.data.materials.append(add_black_mat())
     
     #adding in the atom halo
     
-    bpy.ops.mesh.primitive_circle_add(radius=0.25, fill_type='NGON', enter_editmode=False, align='WORLD', location=(0,0,-0.05), scale=(1, 1, 1))
-    halo = bpy.context.active_object
+    makeHalo(id+str(x)+"_Halo",radius=0.20, segments=32, location=(x, y, -0.05)) 
+    #bpy.ops.mesh.primitive_circle_add(radius=0.25, fill_type='NGON', enter_editmode=False, align='WORLD', location=(0,0,-0.05), scale=(1, 1, 1))
+    halo = bpy.data.objects[id+str(x)+"_Halo"]
     atom_collection.objects.link(halo)
     master_collection.objects.unlink(halo)
     halo.parent = text
-    halo.name = id + "_halo"
+    #@halo.name = id + "_halo"
     
     #assigning a white material to halo
     
-    halo.data.materials.append(add_white_mat())
+    halo.data.materials.append(addWhiteMaterial())
     
     #Adding an empty to act as a handle
     
@@ -118,8 +157,8 @@ def addAtom(x,y,atom,id, hydrogens=0):
     
     #adding the object to the atom collection
     
-    atom_collection.objects.link(text)
-    master_collection.objects.unlink(text)
+    atom_collection.objects.link(t_o)
+    master_collection.objects.unlink(t_o)
 
     
     #text.parent = handle
@@ -145,7 +184,7 @@ def addBond(atom1, atom2, name, order):
     
     col_name = "bonds"
     
-    if find_collection (col_name) == False:
+    if findCollection (col_name) == False:
         bond_collection = bpy.data.collections.new(col_name)
         bpy.context.scene.collection.children.link(bond_collection)
     else:
@@ -273,7 +312,6 @@ def read_cml_file(context, filepath, use_some_setting):
              
          if "atom elementType" in data:
              atom = data[19]
-             print("Is this even working?")
              id_tmp = data.split("id=\"", 1)
              id_tmp2 = id_tmp[1].split("\"",1)
              id = id_tmp2[0]
@@ -281,15 +319,11 @@ def read_cml_file(context, filepath, use_some_setting):
              	                    
              if "hydrogenCount" in data:
                  count_tmp = data.split("hydrogenCount=\"", 1)
-                 count = int(count_tmp[0])
+                 count = int(count_tmp[1][0])
                  print(f"count={count}")
-                 print("Hydrogens need to be handled")
-                 break
             
              x_tmp = data.split("x2=\"",1)
-             print(f"x_tmp={x_tmp}")
              x_tmp2 = x_tmp[1].split("\"", 1)
-             print(f"x_tmp2={x_tmp2}")
              x_pos = x_tmp2[0]
              x_pos = (float(x_pos) * 0.5) - 5
 
