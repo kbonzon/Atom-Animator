@@ -23,11 +23,11 @@ from bpy.props import StringProperty, BoolProperty, EnumProperty
 from bpy.types import Operator
 
 class CreatorPanel(bpy.types.Panel):
-    bl_label = "Compound Creator"
+    bl_label = "Atom Animator"
     bl_idname = "PT_CompoundPanel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'Compound Creator'
+    bl_category = 'Atom Animator'
     
     def draw (self, context):
         layout = self.layout
@@ -36,7 +36,32 @@ class CreatorPanel(bpy.types.Panel):
         row.label(text="Add Compound", icon='OUTLINER_OB_POINTCLOUD')
         row = layout.row()
         row.operator("import_cml.compound_data",icon='OUTLINER_DATA_POINTCLOUD')
+        row = layout.row()
         
+        layout.prop(context.scene, "lone_pair")
+        row= layout.row()
+        layout.prop(context.scene, "lone_pair_selected")
+ 
+def showLonePairs(self, context):
+    should_render = self.lone_pair
+    for obj in bpy.data.objects:
+        if obj.name.startswith("lonepair_"):
+            obj.hide_render = not should_render
+            obj.hide_viewport = not should_render
+            obj.hide_select = not should_render
+
+def showSelectedLonePairs(self, context):
+    should_render = self.lone_pair_selected
+    
+    selected_objects = context.selected_objects
+    
+    for parent in selected_objects:
+        for child in parent.children: 
+            if child.name.startswith("lonepair_"):
+                child.hide_viewport = not should_render
+                child.hide_render = not should_render
+                child.hide_select = not should_render
+       
 def findCollection (collection):
     for col in bpy.data.collections:
             if col.name == collection:
@@ -97,6 +122,7 @@ def makeHalo(name, radius=1.0, segments=32, location=(0,0,0)):
     bm.free()
 
     bpy.context.collection.objects.link(obj)
+    
 
 def addAtom(x,y,atom,id, hydrogens=0):
     
@@ -106,9 +132,6 @@ def addAtom(x,y,atom,id, hydrogens=0):
         bpy.context.scene.collection.children.link(atom_collection)
     else:
         atom_collection = bpy.data.collections[atom]
-    
-    if hydrogens > 1:
-        atom = atom + "H"    
 
     #grabbing the master collection
     
@@ -117,14 +140,30 @@ def addAtom(x,y,atom,id, hydrogens=0):
     #adding the text
     
     t = bpy.data.curves.new(name=id, type="FONT")
-    t.body = atom
+    t.offset_x = -0.015
+    t.offset_y = -0.015
     t.size = 0.5
     t.materials.append(addBlackMaterial())
     t.align_x = "CENTER"
     t.align_y = "CENTER"
     t_o = bpy.data.objects.new(id, t)
     t_o.location = [x, y, 0]
+    if hydrogens > 1:
+        atom = atom + "H"
+        h = bpy.data.curves.new(name=atom, type="FONT")
+        h.body = str(hydrogens)
+        h.materials.append(addBlackMaterial())
+        h.size = 0.3
+        h.offset_x = 0.35
+        h.offset_y = -0.25
+        h_o = bpy.data.objects.new(id+"_sub", h)
+        h_o.parent = t_o
+        h_o.location = [0, 0, 0]
+        atom_collection.objects.link(h_o)
+
+    t.body = atom
     bpy.context.scene.collection.objects.link(t_o)
+    
     
     #Setting the atom text    
 
@@ -139,12 +178,12 @@ def addAtom(x,y,atom,id, hydrogens=0):
     
     #adding in the atom halo
     
-    makeHalo(id+str(x)+"_Halo",radius=0.20, segments=32, location=(x, y, -0.05)) 
+    makeHalo(id+str(x)+"_Halo",radius=0.25, segments=32, location=(0, 0, -0.05)) 
     #bpy.ops.mesh.primitive_circle_add(radius=0.25, fill_type='NGON', enter_editmode=False, align='WORLD', location=(0,0,-0.05), scale=(1, 1, 1))
     halo = bpy.data.objects[id+str(x)+"_Halo"]
     atom_collection.objects.link(halo)
     master_collection.objects.unlink(halo)
-    halo.parent = text
+    halo.parent = t_o
     #@halo.name = id + "_halo"
     
     #assigning a white material to halo
@@ -204,7 +243,7 @@ def addBond(atom1, atom2, name, order):
     bpy.context.active_object.name = planeName
     bondStroke = bpy.context.scene.objects[planeName]
     gpencil_layer = bondStroke.data.layers.new(name, set_active=True)
-    gpencil_layer.location[1] = 0.08
+    gpencil_layer.location[2] = -0.1
     frame = gpencil_layer.frames.new(0)
     #armature.object.data.location += 0.1a
     
@@ -212,13 +251,10 @@ def addBond(atom1, atom2, name, order):
     if order <= 1: 
         draw_line(frame, (0,0,0),(1,0,0))
     else:
-        x = 1
-        for x in range(1, order + 1):
-            draw_line(frame, (0,0,(x*0.1)-0.20),(1,0,(x*0.1)-0.20))
+        for x in range(-1, order - 1):
+            draw_line(frame, (0,0,(x*0.2)+0.15),(1,0,(x*0.2)+0.15))
             
-    gpencil_layer.line_change = 50
-    
-    
+    gpencil_layer.line_change = 50 
     bondPlane = bpy.data.objects[planeName]
     bondArma = bpy.data.objects[bondName]
     bpy.ops.object.select_all(action='DESELECT')
@@ -384,6 +420,20 @@ def menu_func_import(self, context):
 
 # Register and add to the "file selector" menu (required to use F3 search "Text Import Operator" for quick access)
 def register():
+        
+    bpy.types.Scene.lone_pair = bpy.props.BoolProperty(
+        name="Show Lone Pairs",
+        description="Toggle lone pairs",
+        default=False,
+        update=showLonePairs
+    )
+    bpy.types.Scene.lone_pair_selected = bpy.props.BoolProperty(
+        name="Show Selected Lone Pairs",
+        description="Toggle lone pairs on selected atoms",
+        default=False,
+        update=showSelectedLonePairs
+    )
+    
     bpy.utils.register_class(CreatorPanel)
     bpy.utils.register_class(ImportCML)
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
@@ -393,6 +443,9 @@ def unregister():
     bpy.utils.unregister_class(CreatorPanel)
     bpy.utils.unregister_class(ImportCML)
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
+    
+    del bpy.types.Scene.lone_pair
+    del bpy.types.Scene.lone_pair_selected
 
 
 if __name__ == "__main__":
