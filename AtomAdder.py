@@ -169,33 +169,20 @@ def addAtom(x,y,atom,id, hydrogens=0):
     
     
     #Setting the atom text    
-
-    # bpy.ops.font.delete(type='PREVIOUS_WORD')
-    # bpy.ops.font.text_insert(text=atom)
-    # bpy.ops.object.mode_set(mode='OBJECT', toggle=True)
-    # bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='MEDIAN')
-    
-    # #assigning a black material
     
     text = bpy.context.active_object
     
     #adding in the atom halo
     
     makeHalo(id+str(x)+"_Halo",radius=0.25, segments=32, location=(0, 0, -0.05)) 
-    #bpy.ops.mesh.primitive_circle_add(radius=0.25, fill_type='NGON', enter_editmode=False, align='WORLD', location=(0,0,-0.05), scale=(1, 1, 1))
     halo = bpy.data.objects[id+str(x)+"_Halo"]
     atom_collection.objects.link(halo)
     master_collection.objects.unlink(halo)
     halo.parent = t_o
-    #@halo.name = id + "_halo"
     
     #assigning a white material to halo
     
     halo.data.materials.append(addWhiteMaterial())
-    
-    #Adding an empty to act as a handle
-    
-    #handle = bpy.ops.object.empty_add(type='SPHERE', align='WORLD', location=(x, 0, y + 4), scale=(1, 1, 1))
     
     #adding the object to the atom collection
     
@@ -236,19 +223,33 @@ def addBond(atom1, atom2, name, order):
     
     bondName = atom1+ "_" + atom2 + "_" + name[0]
     planeName = name + "_bondPlane"
-    bpy.ops.object.armature_add(enter_editmode=True, align='WORLD', location=(0, 0, 0), scale=(1, 1, 1))
-    armature = bpy.context.active_object
-    armature.name = bondName
-    bpy.ops.armature.select_all(action='SELECT')
-    bpy.ops.armature.duplicate_move(ARMATURE_OT_duplicate={"do_flip_names":False}, TRANSFORM_OT_translate={"value":(1, 0, 0), "orient_type":'GLOBAL', "orient_matrix":((1, 0, 0), (0, 1, 0), (0, 0, 1)), "orient_matrix_type":'GLOBAL', "constraint_axis":(True, False, False), "mirror":False, "use_proportional_edit":False, "proportional_edit_falloff":'SMOOTH', "proportional_size":1, "use_proportional_connected":False, "use_proportional_projected":False, "snap":False, "snap_elements":{'INCREMENT'}, "use_snap_project":False, "snap_target":'CLOSEST', "use_snap_self":True, "use_snap_edit":True, "use_snap_nonedit":True, "use_snap_selectable":False, "snap_point":(0, 0, 0), "snap_align":False, "snap_normal":(0, 0, 0), "gpencil_strokes":False, "cursor_transform":False, "texture_space":False, "remove_on_cancel":False, "view2d_edge_pan":False, "release_confirm":False, "use_accurate":False, "use_automerge_and_split":False})
+    a_data = bpy.data.armatures.new(bondName+"_data")
+    a_data.display_type = 'WIRE'
+    armature = bpy.data.objects.new(bondName, a_data)
+    bond_collection.objects.link(armature)
+    bpy.context.view_layer.objects.active = armature
+    bpy.context.view_layer.objects.active.select_set(True)
+    
+    bpy.context.view_layer.update()
     bpy.ops.object.editmode_toggle()
-    bpy.ops.object.gpencil_add(location=(0, 0, 0), type='EMPTY')
-    bpy.context.active_object.name = planeName
-    bondStroke = bpy.context.scene.objects[planeName]
-    gpencil_layer = bondStroke.data.layers.new(name, set_active=True)
+    edit_bones = armature.data.edit_bones
+    bone = edit_bones.new('Bone')
+    bone.head = Vector((0,0,0))
+    bone.tail = Vector((0,1,0))
+    
+    dup_bone = edit_bones.new('Bone.001')
+    dup_bone.head = bone.head + Vector((1,0,0))
+    dup_bone.tail = bone.tail + Vector((1,0,0))
+    
+    bpy.ops.object.editmode_toggle()
+    
+    gp_data = bpy.data.grease_pencils.new(planeName + "_data")
+    gp_object = bpy.data.objects.new(planeName, gp_data)
+    bpy.context.collection.objects.link(gp_object)
+    
+    gpencil_layer = gp_data.layers.new(name, set_active=True)
     gpencil_layer.location[2] = -0.1
     frame = gpencil_layer.frames.new(0)
-    #armature.object.data.location += 0.1a
     
     #Handling higher order bonds by drawing them off center
     if order <= 1: 
@@ -265,55 +266,42 @@ def addBond(atom1, atom2, name, order):
     gpencil_layer.line_change = 50 
     bondPlane = bpy.data.objects[planeName]
     bondArma = bpy.data.objects[bondName]
+    
+    #Assigning bond plane to armature
+    #I know this uses operators but this is 
+    #The cleanest way I've found since it doesn't require custom
+    #Weights. It's actualy less code.
+    
     bpy.ops.object.select_all(action='DESELECT')
     bondArma.select_set(True)
     bondPlane.select_set(True)
-    bpy.context.view_layer.objects.active = bondArma
-    bpy.context.object.data.display_type = 'WIRE'
-
-    #Assigning bond plane to armature
-    
     bpy.ops.object.parent_set(type='ARMATURE_AUTO', keep_transform=True)
     
     #Adding the armature constraints to the atoms
-    
-    bpy.ops.object.posemode_toggle()
-    
     #Only two bones are needed so we grab them here
     
-    bpy.ops.pose.select_all(action='DESELECT')
-    bone1 = bpy.data.objects[bondName].pose.bones["Bone"].bone
-    bone2 = bpy.data.objects[bondName].pose.bones["Bone.001"].bone
+    bone1 = bpy.data.objects[bondName].pose.bones["Bone"]
+    bone2 = bpy.data.objects[bondName].pose.bones["Bone.001"]
     
     #First, the constraint is applied to bone1
-    
-    bpy.context.view_layer.objects[bondName].data.bones.active = bone1
-    bone1.select = True
-    bpy.ops.pose.constraint_add(type='COPY_LOCATION')
-   # bpy.ops.pose.bones["Bone"].constraints["Copy Location"].use_offset = True
-    bpy.context.object.pose.bones["Bone"].constraints["Copy Location"].target = bpy.data.objects[atom1]
-    bpy.ops.pose.constraint_add(type='TRACK_TO')
-    bpy.context.object.pose.bones["Bone"].constraints["Track To"].target = bpy.data.objects[atom1]
-    bpy.data.objects[bondName].pose.bones["Bone"].constraints["Track To"].up_axis = "UP_X"
-#    bpy.context.object.pose.bones["Bone"].constraints["Track To"].subtarget = "Bone.001"
-#    bpy.data.objects[bondName].pose.bones["Bone"].constraints["Copy Location"].use_offset = True
+    copy_location1 = bone1.constraints.new(type="COPY_LOCATION")
+    copy_location1.target = bpy.data.objects[atom1]
+    #bpy.ops.pose.constraint_add(type='TRACK_TO')
+    track_to1 =  bone1.constraints.new(type="TRACK_TO")
+    track_to1.target = bpy.data.objects[atom2]
+    track_to1.up_axis = "UP_X"
+    track_to1.track_axis = "TRACK_NEGATIVE_Y"
 
     #The constraint is then applied to the second bone
+  
+    copy_location2 = bone2.constraints.new(type="COPY_LOCATION")
+    copy_location2.target = bpy.data.objects[atom2]
+    #bpy.ops.pose.constraint_add(type='TRACK_TO')
+    track_to2 =  bone2.constraints.new(type="TRACK_TO")
+    track_to2.target = bpy.data.objects[atom1]
+    track_to2.up_axis = "UP_X"
+    track_to2.track_axis = "TRACK_Y"
     
-    bpy.ops.pose.select_all(action='DESELECT')
-    bpy.context.view_layer.objects[bondName].data.bones.active = bone2
-    bone2.select = True
-    bpy.ops.pose.constraint_add(type='COPY_LOCATION')
-    #bpy.ops.pose.bones["Bone.001"].constraints["Copy Location"].use_offset = True
-    bpy.context.object.pose.bones["Bone.001"].constraints["Copy Location"].target = bpy.data.objects[atom2]
-    bpy.ops.pose.constraint_add(type='TRACK_TO')
-    bpy.context.object.pose.bones["Bone.001"].constraints["Track To"].target = bpy.data.objects[atom2]
-    bpy.data.objects[bondName].pose.bones["Bone.001"].constraints["Track To"].up_axis = "UP_X"
-#    bpy.context.object.pose.bones["Bone.001"].constraints["Track To"].subtarget = "Bone"
-#    bpy.data.objects[bondName].pose.bones["Bone.001"].constraints["Copy Location"].use_offset = True
-    #We then exit out of pose mode to run the process again if needed
-    
-    bpy.ops.object.posemode_toggle()
     
 def read_cml_file(context, filepath, use_some_setting):
     print("reading file...")
