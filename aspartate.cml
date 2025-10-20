@@ -16,7 +16,7 @@
 <bond atomRefs2="a5 a9" id="b24" order="1"/>
 <bond atomRefs2="a9 a11" id="b25" order="1"/>
 <bond atomRefs2="a11 a13" id="b26" order="1"/>
-<bond atomRefs2="a13 a15" id="b27" order="2"/>
+<bond atomRefs2="a13 a15" id="b27" order="3"/>
 <bond atomRefs2="a13 a17" id="b28" order="1"/>
 <bond atomRefs2="a5 a19" id="b29" order="2"/>
 <bond atomRefs2="a5 a21" id="b30" order="1"/>

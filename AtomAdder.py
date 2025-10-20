@@ -154,8 +154,11 @@ def addAtom(x,y,atom,id, hydrogens=0):
         h.body = str(hydrogens)
         h.materials.append(addBlackMaterial())
         h.size = 0.3
-        h.offset_x = 0.35
+        h.offset_x = 0.52
         h.offset_y = -0.25
+        t.offset_x = -0.215
+        t.offset_y = -0.015
+        t.align_x = "LEFT"
         h_o = bpy.data.objects.new(id+"_sub", h)
         h_o.parent = t_o
         h_o.location = [0, 0, 0]
@@ -251,8 +254,13 @@ def addBond(atom1, atom2, name, order):
     if order <= 1: 
         draw_line(frame, (0,0,0),(1,0,0))
     else:
-        for x in range(-1, order - 1):
-            draw_line(frame, (0,0,(x*0.17)+0.15),(1,0,(x*0.17)+0.15))
+        if order == 2:
+            draw_line(frame, (0,0,-0.1),(1,0,-0.1))
+            draw_line(frame, (0,0,0.1),(1,0,0.1))
+        if order ==3:
+            draw_line(frame, (0,0,-0.15),(1,0,-0.15))
+            draw_line(frame, (0,0,0),(1,0,0))
+            draw_line(frame, (0,0,0.15),(1,0,0.15))
             
     gpencil_layer.line_change = 50 
     bondPlane = bpy.data.objects[planeName]
@@ -285,7 +293,8 @@ def addBond(atom1, atom2, name, order):
    # bpy.ops.pose.bones["Bone"].constraints["Copy Location"].use_offset = True
     bpy.context.object.pose.bones["Bone"].constraints["Copy Location"].target = bpy.data.objects[atom1]
     bpy.ops.pose.constraint_add(type='TRACK_TO')
-#    bpy.context.object.pose.bones["Bone"].constraints["Track To"].target = bpy.data.objects[bondName]
+    bpy.context.object.pose.bones["Bone"].constraints["Track To"].target = bpy.data.objects[atom1]
+    bpy.data.objects[bondName].pose.bones["Bone"].constraints["Track To"].up_axis = "UP_X"
 #    bpy.context.object.pose.bones["Bone"].constraints["Track To"].subtarget = "Bone.001"
 #    bpy.data.objects[bondName].pose.bones["Bone"].constraints["Copy Location"].use_offset = True
 
@@ -298,7 +307,8 @@ def addBond(atom1, atom2, name, order):
     #bpy.ops.pose.bones["Bone.001"].constraints["Copy Location"].use_offset = True
     bpy.context.object.pose.bones["Bone.001"].constraints["Copy Location"].target = bpy.data.objects[atom2]
     bpy.ops.pose.constraint_add(type='TRACK_TO')
-#    bpy.context.object.pose.bones["Bone.001"].constraints["Track To"].target = bpy.data.objects[bondName]
+    bpy.context.object.pose.bones["Bone.001"].constraints["Track To"].target = bpy.data.objects[atom2]
+    bpy.data.objects[bondName].pose.bones["Bone.001"].constraints["Track To"].up_axis = "UP_X"
 #    bpy.context.object.pose.bones["Bone.001"].constraints["Track To"].subtarget = "Bone"
 #    bpy.data.objects[bondName].pose.bones["Bone.001"].constraints["Copy Location"].use_offset = True
     #We then exit out of pose mode to run the process again if needed
