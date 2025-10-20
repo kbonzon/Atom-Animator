@@ -252,7 +252,7 @@ def addBond(atom1, atom2, name, order):
         draw_line(frame, (0,0,0),(1,0,0))
     else:
         for x in range(-1, order - 1):
-            draw_line(frame, (0,0,(x*0.2)+0.15),(1,0,(x*0.2)+0.15))
+            draw_line(frame, (0,0,(x*0.17)+0.15),(1,0,(x*0.17)+0.15))
             
     gpencil_layer.line_change = 50 
     bondPlane = bpy.data.objects[planeName]
@@ -282,11 +282,12 @@ def addBond(atom1, atom2, name, order):
     bpy.context.view_layer.objects[bondName].data.bones.active = bone1
     bone1.select = True
     bpy.ops.pose.constraint_add(type='COPY_LOCATION')
-    print("atom1 name is " + atom1)
+   # bpy.ops.pose.bones["Bone"].constraints["Copy Location"].use_offset = True
     bpy.context.object.pose.bones["Bone"].constraints["Copy Location"].target = bpy.data.objects[atom1]
     bpy.ops.pose.constraint_add(type='TRACK_TO')
-    bpy.context.object.pose.bones["Bone"].constraints["Track To"].target = bpy.data.objects[bondName]
-    bpy.context.object.pose.bones["Bone"].constraints["Track To"].subtarget = "Bone.001"
+#    bpy.context.object.pose.bones["Bone"].constraints["Track To"].target = bpy.data.objects[bondName]
+#    bpy.context.object.pose.bones["Bone"].constraints["Track To"].subtarget = "Bone.001"
+#    bpy.data.objects[bondName].pose.bones["Bone"].constraints["Copy Location"].use_offset = True
 
     #The constraint is then applied to the second bone
     
@@ -294,19 +295,15 @@ def addBond(atom1, atom2, name, order):
     bpy.context.view_layer.objects[bondName].data.bones.active = bone2
     bone2.select = True
     bpy.ops.pose.constraint_add(type='COPY_LOCATION')
+    #bpy.ops.pose.bones["Bone.001"].constraints["Copy Location"].use_offset = True
     bpy.context.object.pose.bones["Bone.001"].constraints["Copy Location"].target = bpy.data.objects[atom2]
     bpy.ops.pose.constraint_add(type='TRACK_TO')
-    bpy.context.object.pose.bones["Bone.001"].constraints["Track To"].target = bpy.data.objects[bondName]
-    bpy.context.object.pose.bones["Bone.001"].constraints["Track To"].subtarget = "Bone"
-    
+#    bpy.context.object.pose.bones["Bone.001"].constraints["Track To"].target = bpy.data.objects[bondName]
+#    bpy.context.object.pose.bones["Bone.001"].constraints["Track To"].subtarget = "Bone"
+#    bpy.data.objects[bondName].pose.bones["Bone.001"].constraints["Copy Location"].use_offset = True
     #We then exit out of pose mode to run the process again if needed
     
     bpy.ops.object.posemode_toggle()
-    
-    bond_collection.objects.link(bondPlane)
-    bond_collection.objects.link(bondArma)
-    master_collection.objects.unlink(bondPlane)
-    master_collection.objects.unlink(bondArma)
     
 def read_cml_file(context, filepath, use_some_setting):
     print("reading file...")
