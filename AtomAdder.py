@@ -213,6 +213,8 @@ def addBond(atom1, atom2, name, order):
     
     col_name = "bonds"
     
+    bond_collection = None
+    
     if findCollection (col_name) == False:
         bond_collection = bpy.data.collections.new(col_name)
         bpy.context.scene.collection.children.link(bond_collection)
@@ -245,7 +247,7 @@ def addBond(atom1, atom2, name, order):
     
     gp_data = bpy.data.grease_pencils.new(planeName + "_data")
     gp_object = bpy.data.objects.new(planeName, gp_data)
-    bpy.context.collection.objects.link(gp_object)
+    bond_collection.objects.link(gp_object)
     
     gpencil_layer = gp_data.layers.new(name, set_active=True)
     gpencil_layer.location[2] = -0.1
