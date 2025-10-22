@@ -13,6 +13,7 @@ bl_info = {
 import bpy
 import math
 import bmesh
+import random
 import mathutils
 from mathutils import Vector
 # ImportHelper is a helper class, defines filename and
@@ -21,6 +22,140 @@ from bpy_extras.io_utils import ImportHelper
 from bpy.types import GPencilFrame
 from bpy.props import StringProperty, BoolProperty, EnumProperty
 from bpy.types import Operator
+
+class CreateArrow(bpy.types.Operator):
+    bl_idname = "object.generate_arrow"
+    bl_label = "Generate Arrow"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute (self, context):
+        arrow_collection = context.scene.collection
+        
+#        if not arrow_collection:
+#            arrow_collection = bpy.data.collections.new("arrows")
+#            
+#        if not arrow_collection.name not in context.scene.collection.children:
+#            context.scene.collection.children.link((bpy.data.collections["arrows"]))
+                
+        selected_objects = context.selected_objects
+        
+        if len (selected_objects) != 2:
+            self.report({'ERROR'}, "Please select exactly 2 objects.")
+            return {'CANCELLED'}
+        
+        obj1, obj2 = selected_objects
+        
+        p0 = obj1.location
+        p2 = obj2.location
+        
+        mid = (p0 + p2) / 2
+        
+        direction = (p2 - p0).normalized()
+        up = Vector((0, 0, 1))
+        up_head = Vector((0,1,0))
+        if direction.cross(up).length < 1e-3:
+            up = mathutils.Vector((1, 0, 0))
+            
+        right = direction.cross(up).normalized()
+        p1 = mid + right * 0.5
+        
+        gpencil_name = "CurvedArrow_GPencil" + str(random.randint(1, 500))
+        
+        gp_data=bpy.data.grease_pencils.new(gpencil_name)
+        gp_object = bpy.data.objects.new(gpencil_name, gp_data)
+        mat = addBlackMaterial()
+        mat.use_nodes = True
+        fill_node = mat.node_tree.nodes.get("Fill")
+        if fill_node:
+            fill_node.inputs[0].default_value = (0, 0, 0, 1)
+        #mat.grease_pencil = True
+        gp_data.materials.append(mat)
+        arrow_collection.objects.link(gp_object)
+        
+        layer = gp_data.layers.new(name="ArrowLayer", set_active=True)
+        frame = layer.frames.new(context.scene.frame_current)
+        
+        stroke = frame.strokes.new()
+        stroke.display_mode = '3DSPACE'
+        stroke.line_width = 30
+        num_points = 64
+        stroke.points.add(count=num_points)
+        
+        def bezier_point(p0, p1, p2, t):
+            return (1-t)**2 * p0 + 2 * (1-t)*t*p1 + t**2 * p2
+        
+        for i in range(num_points):
+            t = i / (num_points - 1)
+            stroke.points[i].co = bezier_point(p0, p1, p2, t)
+            
+        p_end = stroke.points[-1].co
+        p_before = stroke.points[-2].co
+        tangent = (p_end - p_before).normalized()
+        
+        angle_rad = math.radians(30)
+        rot_axis = tangent.cross(up_head)
+        if rot_axis < 1e-6:
+            rot_axis = mathutils.Vector((1,0,0))
+        rot_axis.normalize()
+        
+        rot_mat1 = mathutils.Matrix.Rotation(math.pi - angle_rad, 4, rot_axis)
+        rot_mat2 = mathutils.Matrix.Rotation(math.pi + angle_rad, 4, rot_axis)
+    
+        dir1 = tangent.copy()
+        dir2 = tangent.copy()
+        dir1.rotate(rot_mat1)
+        dir2.rotate(rot_mat2)
+        
+        head_len = 0.2
+        num_lines = 100
+        v0 = p_end
+        v1 = p_end + dir1 * head_len
+        v2 = p_end + dir2 * head_len
+
+        for i in range(num_lines + 1):
+            t = i / num_lines
+            # Linearly interpolate between v1 and v2
+            start = v1.lerp(v2, t)
+            end = v0.lerp(start, 0)  # Bring it toward the tip (optional)
+
+            hatch = frame.strokes.new()
+            hatch.display_mode = '3DSPACE'
+            hatch.line_width = 30
+            hatch.material_index = 0
+            hatch.points.add(count=2)
+            hatch.points[0].co = start
+            hatch.points[1].co = end
+            
+        #This is for if the head is not filled in. 
+#        arrow_head_stroke = frame.strokes.new()
+#        arrow_head_stroke.display_mode = '3DSPACE'
+#        arrow_head_stroke.line_width = 20
+#        #arrow_head_stroke.cyclic = True  # This closes the triangle
+
+#        arrow_head_stroke.points.add(count=4)
+#        arrow_head_stroke.points[0].co = p_end
+#        arrow_head_stroke.points[1].co = p_end + dir1 * head_len
+#        arrow_head_stroke.points[2].co = p_end + dir2 * head_len
+#        arrow_head_stroke.points[3].co = p_end
+        
+        
+        #Adding modifiers to draw them in and out
+        draw_mod = gp_object.grease_pencil_modifiers.new(name="Arrow_DrawIn", type='GP_BUILD')
+        draw_mod.mode = 'SEQUENTIAL'
+        draw_mod.transition = 'GROW'
+        draw_mod.show_viewport = False
+        draw_mod.length = 10 
+
+        # Add "Vanish" build modifier
+        vanish_mod = gp_object.grease_pencil_modifiers.new(name="Arrow_Vanish", type='GP_BUILD')
+        vanish_mod.mode = 'SEQUENTIAL'
+        vanish_mod.transition = 'FADE'
+        vanish_mod.start_delay = 10  # Delay after first build
+        vanish_mod.length = 10  # Duration in frames
+        
+        self.report({"INFO"}, "Arrow created")
+        return {"FINISHED"}
+        
 
 class CreatorPanel(bpy.types.Panel):
     bl_label = "Atom Animator"
@@ -41,6 +176,12 @@ class CreatorPanel(bpy.types.Panel):
         layout.prop(context.scene, "lone_pair")
         row= layout.row()
         layout.prop(context.scene, "lone_pair_selected")
+        
+        row = layout.row()
+        layout.label(text="Generate arrow")
+        layout.operator("object.generate_arrow", icon="ACTION")
+        
+
  
 def showLonePairs(self, context):
     should_render = self.lone_pair
@@ -70,15 +211,41 @@ def findCollection (collection):
 
 
 def addBlackMaterial():
+#    mat = bpy.data.materials.get("Black")
+#    
+#    if mat is None:
+#        mat = bpy.data.materials.new(name="Black") 
+#        
+#    mat.diffuse_color = (0, 0, 0, 1)
+#    mat.specular_intensity = 0  
+#    mat.roughness = 1
+#    
+#    return mat
+
     mat = bpy.data.materials.get("Black")
-    
-    if mat is None:
-        mat = bpy.data.materials.new(name="Black") 
         
-    mat.diffuse_color = (0, 0, 0, 1)
-    mat.specular_intensity = 0  
-    mat.roughness = 1
-    
+    if mat is None:
+        mat = bpy.data.materials.new(name="Black")
+        mat.use_nodes = True
+        
+        nodes = mat.node_tree.nodes
+        links = mat.node_tree.links
+        
+        # Clear existing nodes
+        nodes.clear()
+
+        # Create nodes
+        output_node = nodes.new(type="ShaderNodeOutputMaterial")
+        output_node.location = (300, 0)
+
+        emission_node = nodes.new(type="ShaderNodeEmission")
+        emission_node.location = (0, 0)
+        emission_node.inputs["Color"].default_value = (0, 0, 0, 1)  # Black RGBA
+        emission_node.inputs["Strength"].default_value = 1.0  # Optional: set strength
+
+        # Link nodes
+        links.new(emission_node.outputs["Emission"], output_node.inputs["Surface"])
+
     return mat
     
 def addWhiteMaterial():
@@ -149,7 +316,22 @@ def addAtom(x,y,atom,id, hydrogens=0):
     t_o = bpy.data.objects.new(id, t)
     t_o.location = [x, y, 0]
     if hydrogens > 1:
-        atom = atom + "H"
+        
+        #First, adding the actual letter
+        h_text = bpy.data.curves.new(name=atom, type="FONT")
+        h_text.size = 0.5
+        h_text.align_x = "LEFT"
+        h_text.align_y = "CENTER"
+        h_text.offset_x = 0.175
+        h_text.offset_y = -0.015
+        h_text.body = "H"
+        h_text.materials.append(addBlackMaterial())
+        h_text_o = bpy.data.objects.new(id+"_H", h_text)
+        h_text_o.location = [0, 0, 0]
+        h_text_o.parent = t_o
+        atom_collection.objects.link(h_text_o)
+        
+        #Now, handling subscripts
         h = bpy.data.curves.new(name=atom, type="FONT")
         h.body = str(hydrogens)
         h.materials.append(addBlackMaterial())
@@ -202,6 +384,63 @@ def draw_line(gp_frame, p0 : tuple, p1 : tuple):
     gp_stroke.points[0].co = p0
     gp_stroke.points[1].co = p1 
     return gp_stroke
+
+def getBondNumber(atom, id):
+    num_bonds = 0
+    for obj in bpy.data.objects:
+        if id in obj.name:
+            num_bonds = num_bonds + 1
+    
+    return num_bonds
+
+def handleLonePairs(atom, id):
+#    if findCollection (atom) == False:
+#        bond_collection = bpy.data.collections.new(col_name)
+#        bpy.context.scene.collection.children.link(bond_collection)
+#    else:
+#        bond_collection = bpy.data.collections[col_name]
+#    
+#    num_bonds = getBondNumber(atom)
+#    num_lone_pairs = 0
+#    
+#    if num_bonds == 0:
+#        num_lone_pairs = 4
+#    if num_bonds == 1:
+#        num_lone_pairs = 3
+#    if num_bonds == 2:
+#        num_lone_pairs = 2
+#    if num_bonds == 3:
+#        num_lone_pairs = 1
+#    if num_bonds == 4:
+#        num_lone_pairs = 0
+#        
+#    lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+id)
+#    gpencil_layer = lone_pairs_data.layers.new(name, set_active=True)
+#    frame = gpencil_layer.frames.new(0)
+#        
+#    lone_pairs = bpy.data.objects.new("lonepair_"+id, lone_pairs_data)
+#    
+#    if num_lone_pairs == 1:
+        
+        
+    #OK so if there is only one bond, I need the lone pairs
+    #to find the atom it's parented to and track to it.
+    #I need three lone pairs opposite the bond
+    
+    #OK so for two bonds, I need it to find the atoms
+    #opposite the lone pairs, add a gpencil object for each
+    #and then do the track to thing again (up is Z and track
+    #axis is -Y). Set the influence to 0.75 too. 
+    
+    #For three bonds, I think just pick a bond and do this
+    
+    #All of this also needs to handle bond order ok this is 
+    #getting harder
+    
+    #AND atom types (N, C, S even, O)
+        
+    return
+        
 
 def addBond(atom1, atom2, name, order):
     
@@ -430,15 +669,24 @@ def register():
         default=False,
         update=showSelectedLonePairs
     )
-    
+#   
+    bpy.utils.register_class(CreateArrow) 
     bpy.utils.register_class(CreatorPanel)
     bpy.utils.register_class(ImportCML)
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
 
+#    for cls in classes:
+#        bpy.utils.register_class(cls)
+
 
 def unregister():
+    bpy.utils.unregister_class(CreateArrow) 
     bpy.utils.unregister_class(CreatorPanel)
     bpy.utils.unregister_class(ImportCML)
+
+    for cls in classes:
+        bpy.utils.unregister_class(cls)
+
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
     
     del bpy.types.Scene.lone_pair
