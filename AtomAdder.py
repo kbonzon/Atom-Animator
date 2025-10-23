@@ -16,6 +16,8 @@ import bmesh
 import random
 import mathutils
 from mathutils import Vector
+from pathlib import Path
+from bpy.props import IntProperty, PointerProperty
 # ImportHelper is a helper class, defines filename and
 # invoke() function which calls the file selector.
 from bpy_extras.io_utils import ImportHelper
@@ -23,11 +25,47 @@ from bpy.types import GPencilFrame
 from bpy.props import StringProperty, BoolProperty, EnumProperty
 from bpy.types import Operator
 
+class BondOrder (bpy.types.PropertyGroup):
+    order : IntProperty(
+        name = "Bond Order",
+        description="Bond order for newly created bonds. (1-3)",
+        default=1, min = 1, soft_max=3
+    )
+
+class MakeBond(bpy.types.Operator):
+    bl_idname = "object.generate_bond"
+    bl_label = "Generate Bond"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute (self, context):
+        
+        selected_objects = context.selected_objects
+
+        if len(selected_objects) != 2:
+            self.report({'ERROR'}, "Select two atoms")
+            return {'CANCELLED'}
+
+        atom1 = selected_objects[0].name
+        atom2 = selected_objects[1].name
+
+        bond_name = atom1 + "_" + atom2 +"_new"
+
+        order = context.scene.bond_order.order
+
+        addBond(atom1, atom2, bond_name, order)
+
+        return {'FINISHED'}
+
+
+
 class CreateArrow(bpy.types.Operator):
     bl_idname = "object.generate_arrow"
     bl_label = "Generate Arrow"
     bl_options = {'REGISTER', 'UNDO'}
-    
+
+    def bezier_point(self, p0, p1, p2, t):
+        return (1-t)**2 * p0 + 2 * (1-t)*t*p1 + t**2 * p2
+
     def execute (self, context):
         arrow_collection = context.scene.collection
         
@@ -47,7 +85,10 @@ class CreateArrow(bpy.types.Operator):
         
         p0 = obj1.location
         p2 = obj2.location
-        
+
+        start_offset = 13
+        end_offset = 13
+
         mid = (p0 + p2) / 2
         
         direction = (p2 - p0).normalized()
@@ -65,28 +106,32 @@ class CreateArrow(bpy.types.Operator):
         gp_object = bpy.data.objects.new(gpencil_name, gp_data)
         mat = addBlackMaterial()
         mat.use_nodes = True
-        fill_node = mat.node_tree.nodes.get("Fill")
-        if fill_node:
-            fill_node.inputs[0].default_value = (0, 0, 0, 1)
         #mat.grease_pencil = True
         gp_data.materials.append(mat)
         arrow_collection.objects.link(gp_object)
         
         layer = gp_data.layers.new(name="ArrowLayer", set_active=True)
         frame = layer.frames.new(context.scene.frame_current)
-        
         stroke = frame.strokes.new()
         stroke.display_mode = '3DSPACE'
         stroke.line_width = 30
         num_points = 64
-        stroke.points.add(count=num_points)
         
-        def bezier_point(p0, p1, p2, t):
-            return (1-t)**2 * p0 + 2 * (1-t)*t*p1 + t**2 * p2
+        pts = [self.bezier_point(p0, p1, p2, i /(num_points - 2)) for i in range(num_points)]
+
+        start_i = min(start_offset, num_points - 2)
+        end_i = max(num_points - 1 - end_offset, start_i + 1)
+
+        trimmed = pts[start_i:end_i+1]
+
+        stroke.points.add(count=len(trimmed))
+
+        for j, co in enumerate(trimmed):
+            stroke.points[j].co = co
         
-        for i in range(num_points):
-            t = i / (num_points - 1)
-            stroke.points[i].co = bezier_point(p0, p1, p2, t)
+        # for i in range(num_points):
+        #     t = i / (num_points - 1)
+        #     stroke.points[i].co = self.bezier_point(p0, p1, p2, t)
             
         p_end = stroke.points[-1].co
         p_before = stroke.points[-2].co
@@ -180,6 +225,11 @@ class CreatorPanel(bpy.types.Panel):
         row = layout.row()
         layout.label(text="Generate arrow")
         layout.operator("object.generate_arrow", icon="ACTION")
+        
+        row = layout.row()
+        props = context.scene.bond_order
+        layout.prop(props, "order")
+        layout.operator("object.generate_bond", icon="ACTION")
         
 
  
@@ -547,9 +597,8 @@ def addBond(atom1, atom2, name, order):
 def read_cml_file(context, filepath, use_some_setting):
     print("reading file...")
     f = open(filepath, 'r', encoding='utf-8')
-    fname_tmp = f.name
-    fname_tmp1 = fname_tmp.split("\\",-1)
-    fname = fname_tmp1[2]
+    file = Path(f.name)
+    fname = file.stem
     data = f.readline()
     
     while data != "</molecule>\n" :
@@ -673,6 +722,9 @@ def register():
     bpy.utils.register_class(CreateArrow) 
     bpy.utils.register_class(CreatorPanel)
     bpy.utils.register_class(ImportCML)
+    bpy.utils.register_class(MakeBond)
+    bpy.utils.register_class(BondOrder)
+    bpy.types.Scene.bond_order = PointerProperty(type=BondOrder)
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
 
 #    for cls in classes:
@@ -691,6 +743,9 @@ def unregister():
     
     del bpy.types.Scene.lone_pair
     del bpy.types.Scene.lone_pair_selected
+    del bpy.types.Scene.bond_order
+    bpy.utils.unregister_class(MakeBond)
+    bpy.utils.unregister_class(BondOrder)
 
 
 if __name__ == "__main__":
