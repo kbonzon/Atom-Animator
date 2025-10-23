@@ -56,8 +56,6 @@ class MakeBond(bpy.types.Operator):
 
         return {'FINISHED'}
 
-
-
 class CreateArrow(bpy.types.Operator):
     bl_idname = "object.generate_arrow"
     bl_label = "Generate Arrow"
@@ -68,20 +66,14 @@ class CreateArrow(bpy.types.Operator):
 
     def execute (self, context):
         arrow_collection = context.scene.collection
-        
-#        if not arrow_collection:
-#            arrow_collection = bpy.data.collections.new("arrows")
-#            
-#        if not arrow_collection.name not in context.scene.collection.children:
-#            context.scene.collection.children.link((bpy.data.collections["arrows"]))
-                
+                    
         selected_objects = context.selected_objects
         
         if len (selected_objects) != 2:
             self.report({'ERROR'}, "Please select exactly 2 objects.")
             return {'CANCELLED'}
         
-        obj1, obj2 = selected_objects
+        obj2, obj1 = selected_objects
         
         p0 = obj1.location
         p2 = obj2.location
@@ -170,20 +162,7 @@ class CreateArrow(bpy.types.Operator):
             hatch.points.add(count=2)
             hatch.points[0].co = start
             hatch.points[1].co = end
-            
-        #This is for if the head is not filled in. 
-#        arrow_head_stroke = frame.strokes.new()
-#        arrow_head_stroke.display_mode = '3DSPACE'
-#        arrow_head_stroke.line_width = 20
-#        #arrow_head_stroke.cyclic = True  # This closes the triangle
 
-#        arrow_head_stroke.points.add(count=4)
-#        arrow_head_stroke.points[0].co = p_end
-#        arrow_head_stroke.points[1].co = p_end + dir1 * head_len
-#        arrow_head_stroke.points[2].co = p_end + dir2 * head_len
-#        arrow_head_stroke.points[3].co = p_end
-        
-        
         #Adding modifiers to draw them in and out
         draw_mod = gp_object.grease_pencil_modifiers.new(name="Arrow_DrawIn", type='GP_BUILD')
         draw_mod.mode = 'SEQUENTIAL'
@@ -200,7 +179,95 @@ class CreateArrow(bpy.types.Operator):
         
         self.report({"INFO"}, "Arrow created")
         return {"FINISHED"}
+ 
+class ToggleLonePairs(bpy.types.Operator):
+    bl_idname = "object.toggle_lonepairs"
+    bl_label = "Toggle Lonepairs"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def getBondNumber(self, atom):
+        num_bonds = 0
+        for obj in bpy.data.objects:
+            if atom in obj.name:
+                num_bonds = num_bonds + 1
         
+        return num_bonds - 1
+
+    def showSelectedLonePairs(self, selected_objects, should_render, context):
+        obj_lps = 0
+
+        for parent in selected_objects:
+            for child in parent.children: 
+                if child.name.startswith("lonepair_"):
+                    obj_lps = obj_lps + 1
+
+                    child.hide_viewport = not should_render
+                    child.hide_render = not should_render
+                    child.hide_select = not should_render
+        
+        #If lone pairs have not been generated
+        if obj_lps == 0:
+            for obj in selected_objects:
+                self.handleLonePairs(obj.name, context)
+
+    def handleLonePairs(self, atom, context):
+
+        num_bonds = self.getBondNumber(atom)
+        num_lone_pairs = 0
+        print(num_bonds)
+        atom_object = bpy.data.objects[atom]
+
+        if num_bonds == 0:
+            num_lone_pairs = 4
+        if num_bonds == 1:
+            num_lone_pairs = 3
+        if num_bonds == 2:
+            num_lone_pairs = 2
+        if num_bonds == 3:
+            num_lone_pairs = 1
+        if num_bonds == 4:
+            num_lone_pairs = 0
+
+        #Loop through each
+        for i in range (num_lone_pairs, 1):
+            lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+atom)
+            gpencil_layer = lone_pairs_data.layers.new(name="LP", set_active=True)
+            frame = gpencil_layer.frames.new(context.scene.frame_current)
+            lone_pairs = bpy.data.objects.new("lonepair_"+atom, lone_pairs_data)
+            lone_pairs.parent = atom_object
+            context.scene.collection.objects.link(lone_pairs)
+
+            break
+            
+        #OK so if there is only one bond, I need the lone pairs
+        #to find the atom it's parented to and track to it.
+        #I need three lone pairs opposite the bond
+
+        #OK so for two bonds, I need it to find the atoms
+        #opposite the lone pairs, add a gpencil object for each
+        #and then do the track to thing again (up is Z and track
+        #axis is -Y). Set the influence to 0.75 too. 
+
+        #For three bonds, I think just pick a bond and do this
+
+        #All of this also needs to handle bond order ok this is 
+        #getting harder
+
+        #AND atom types (N, C, S even, O)
+            
+        return
+        
+
+    def execute (self, context):
+        selected_objects = context.selected_objects
+
+        if len(selected_objects) == 0:
+            self.report({'ERROR'}, 'Please select at least one atom.')
+            return {'CANCELLED'}
+
+        self.showSelectedLonePairs(selected_objects, True, context)
+
+        return {'FINISHED'}
 
 class CreatorPanel(bpy.types.Panel):
     bl_label = "Atom Animator"
@@ -217,10 +284,7 @@ class CreatorPanel(bpy.types.Panel):
         row = layout.row()
         row.operator("import_cml.compound_data",icon='OUTLINER_DATA_POINTCLOUD')
         row = layout.row()
-        
-        layout.prop(context.scene, "lone_pair")
-        row= layout.row()
-        layout.prop(context.scene, "lone_pair_selected")
+        layout.operator("object.toggle_lonepairs",icon="ACTION")
         
         row = layout.row()
         layout.label(text="Generate arrow")
@@ -231,28 +295,14 @@ class CreatorPanel(bpy.types.Panel):
         layout.prop(props, "order")
         layout.operator("object.generate_bond", icon="ACTION")
         
+# def showLonePairs(self, context):
+#     should_render = self.lone_pair
+#     for obj in bpy.data.objects:
+#         if obj.name.startswith("lonepair_"):
+#             obj.hide_render = not should_render
+#             obj.hide_viewport = not should_render
+#             obj.hide_select = not should_render
 
- 
-def showLonePairs(self, context):
-    should_render = self.lone_pair
-    for obj in bpy.data.objects:
-        if obj.name.startswith("lonepair_"):
-            obj.hide_render = not should_render
-            obj.hide_viewport = not should_render
-            obj.hide_select = not should_render
-
-def showSelectedLonePairs(self, context):
-    should_render = self.lone_pair_selected
-    
-    selected_objects = context.selected_objects
-    
-    for parent in selected_objects:
-        for child in parent.children: 
-            if child.name.startswith("lonepair_"):
-                child.hide_viewport = not should_render
-                child.hide_render = not should_render
-                child.hide_select = not should_render
-       
 def findCollection (collection):
     for col in bpy.data.collections:
             if col.name == collection:
@@ -340,7 +390,6 @@ def makeHalo(name, radius=1.0, segments=32, location=(0,0,0)):
 
     bpy.context.collection.objects.link(obj)
     
-
 def addAtom(x,y,atom,id, hydrogens=0):
     
     #grabbing the right collection
@@ -435,63 +484,6 @@ def draw_line(gp_frame, p0 : tuple, p1 : tuple):
     gp_stroke.points[1].co = p1 
     return gp_stroke
 
-def getBondNumber(atom, id):
-    num_bonds = 0
-    for obj in bpy.data.objects:
-        if id in obj.name:
-            num_bonds = num_bonds + 1
-    
-    return num_bonds
-
-def handleLonePairs(atom, id):
-#    if findCollection (atom) == False:
-#        bond_collection = bpy.data.collections.new(col_name)
-#        bpy.context.scene.collection.children.link(bond_collection)
-#    else:
-#        bond_collection = bpy.data.collections[col_name]
-#    
-#    num_bonds = getBondNumber(atom)
-#    num_lone_pairs = 0
-#    
-#    if num_bonds == 0:
-#        num_lone_pairs = 4
-#    if num_bonds == 1:
-#        num_lone_pairs = 3
-#    if num_bonds == 2:
-#        num_lone_pairs = 2
-#    if num_bonds == 3:
-#        num_lone_pairs = 1
-#    if num_bonds == 4:
-#        num_lone_pairs = 0
-#        
-#    lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+id)
-#    gpencil_layer = lone_pairs_data.layers.new(name, set_active=True)
-#    frame = gpencil_layer.frames.new(0)
-#        
-#    lone_pairs = bpy.data.objects.new("lonepair_"+id, lone_pairs_data)
-#    
-#    if num_lone_pairs == 1:
-        
-        
-    #OK so if there is only one bond, I need the lone pairs
-    #to find the atom it's parented to and track to it.
-    #I need three lone pairs opposite the bond
-    
-    #OK so for two bonds, I need it to find the atoms
-    #opposite the lone pairs, add a gpencil object for each
-    #and then do the track to thing again (up is Z and track
-    #axis is -Y). Set the influence to 0.75 too. 
-    
-    #For three bonds, I think just pick a bond and do this
-    
-    #All of this also needs to handle bond order ok this is 
-    #getting harder
-    
-    #AND atom types (N, C, S even, O)
-        
-    return
-        
-
 def addBond(atom1, atom2, name, order):
     
      #grabbing the master collection
@@ -512,7 +504,7 @@ def addBond(atom1, atom2, name, order):
     
     #Creating Armature and bond plane
     
-    bondName = atom1+ "_" + atom2 + "_" + name[0]
+    bondName = atom1+ "_" + atom2 + "_" + name[0] + str(order)
     planeName = name + "_bondPlane"
     a_data = bpy.data.armatures.new(bondName+"_data")
     a_data.display_type = 'WIRE'
@@ -705,36 +697,21 @@ def menu_func_import(self, context):
 
 # Register and add to the "file selector" menu (required to use F3 search "Text Import Operator" for quick access)
 def register():
-        
-    bpy.types.Scene.lone_pair = bpy.props.BoolProperty(
-        name="Show Lone Pairs",
-        description="Toggle lone pairs",
-        default=False,
-        update=showLonePairs
-    )
-    bpy.types.Scene.lone_pair_selected = bpy.props.BoolProperty(
-        name="Show Selected Lone Pairs",
-        description="Toggle lone pairs on selected atoms",
-        default=False,
-        update=showSelectedLonePairs
-    )
-#   
     bpy.utils.register_class(CreateArrow) 
     bpy.utils.register_class(CreatorPanel)
     bpy.utils.register_class(ImportCML)
     bpy.utils.register_class(MakeBond)
     bpy.utils.register_class(BondOrder)
+    bpy.utils.register_class(ToggleLonePairs)
     bpy.types.Scene.bond_order = PointerProperty(type=BondOrder)
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
-
-#    for cls in classes:
-#        bpy.utils.register_class(cls)
 
 
 def unregister():
     bpy.utils.unregister_class(CreateArrow) 
     bpy.utils.unregister_class(CreatorPanel)
     bpy.utils.unregister_class(ImportCML)
+    bpy.utils.unregister_class(ToggleLonePairs)
 
     for cls in classes:
         bpy.utils.unregister_class(cls)
