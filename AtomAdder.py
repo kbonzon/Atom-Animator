@@ -67,13 +67,18 @@ class CreateArrow(bpy.types.Operator):
     def execute (self, context):
         arrow_collection = context.scene.collection
                     
-        selected_objects = context.selected_objects
-        
+        selected_objects = list(context.selected_objects)
+        active = context.view_layer.objects.active
+
         if len (selected_objects) != 2:
             self.report({'ERROR'}, "Please select exactly 2 objects.")
             return {'CANCELLED'}
         
-        obj2, obj1 = selected_objects
+        if active in selected_objects:
+            selected_objects.remove(active)
+            selected_objects.append(active)
+
+        obj1, obj2 = selected_objects
         
         p0 = obj1.location
         p2 = obj2.location
