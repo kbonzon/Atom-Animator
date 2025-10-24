@@ -185,13 +185,27 @@ class ToggleLonePairs(bpy.types.Operator):
     bl_label = "Toggle Lonepairs"
     bl_options = {'REGISTER', 'UNDO'}
 
+    should_render = False
+
     def getBondNumber(self, atom):
         num_bonds = 0
-        for obj in bpy.data.objects:
+        for obj in bpy.data.collections['bonds'].objects:
             if atom in obj.name:
                 num_bonds = num_bonds + 1
         
-        return num_bonds - 1
+        return num_bonds
+
+    def getBondedAtoms(self, atom):
+        bonded_atoms = []
+        for obj in bpy.data.collections['bonds'].objects:
+            if atom in obj.name:
+                #To grab the bonded atoms
+                #First, split the names
+                tmp = [p for p in obj.name.split("_") if p != atom] 
+                bonded_atoms.append(tmp)
+
+        #cleaned_up = list(set(bonded_atoms))
+        return bonded_atoms
 
     def showSelectedLonePairs(self, selected_objects, should_render, context):
         obj_lps = 0
@@ -265,7 +279,113 @@ class ToggleLonePairs(bpy.types.Operator):
             self.report({'ERROR'}, 'Please select at least one atom.')
             return {'CANCELLED'}
 
-        self.showSelectedLonePairs(selected_objects, True, context)
+        #self.showSelectedLonePairs(selected_objects, True, context)
+
+        obj_lps = 0
+
+        should_render = self.should_render
+
+        for parent in selected_objects:
+            for child in parent.children: 
+                if child.name.startswith("lonepair_"):
+                    obj_lps = obj_lps + 1
+
+                    should_render = child.hide_viewport
+                    
+                    should_render = not should_render
+
+                    child.hide_viewport = should_render
+                    child.hide_render = should_render
+                    child.hide_select = should_render
+        
+
+        print(f"Should render is {should_render}")
+        #If lone pairs have not been generated
+        if obj_lps == 0:
+            for obj in selected_objects:
+                #self.handleLonePairs(obj.name, context)
+
+                num_bonds = self.getBondNumber(obj.name)
+                num_lone_pairs = 0
+                print(f"bonds {num_bonds} and lonepairs {obj_lps} for {obj.name}")
+                # atom_object = bpy.data.objects[atom]
+
+                if obj.users_collection:
+                    atom_collection = obj.users_collection[0]
+
+                atom_type = atom_collection.name
+
+
+                if num_bonds == 0:
+                    num_lone_pairs = 4
+                if num_bonds == 1:
+                    num_lone_pairs = 3
+                if num_bonds == 2:
+                    if atom_type == 'C':
+                        num_lone_pairs = 1
+                    if atom_type == 'O':
+                        num_lone_pairs = 2
+                if num_bonds == 3:
+                    num_lone_pairs = 1
+                if num_bonds == 4:
+                    num_lone_pairs = 0
+
+                atom = obj.name
+                bonded_atoms = self.getBondedAtoms(atom)
+                bonded_atoms_objects = []
+
+                #This is a really janky way to do this I know
+                #I need to refactor this eventually
+                for bonded_atom in bonded_atoms:
+                    for atom1 in bonded_atom:
+                        for obj1 in bpy.context.scene.objects:
+                            if atom1 == obj1.name:
+                                bonded_atoms_objects.append(obj1)
+                
+                lone_pair_objects = []
+
+                #Looks like I need to handle lone pairs
+                #separately based on the bonding
+                if num_lone_pairs == 2:
+                    for i in range (0, num_lone_pairs):
+                        const_target = None
+                        # if i < len(bonded_atoms_objects):
+                        const_target=bonded_atoms_objects[i]
+                        # else:
+                        #     const_target=bonded_atoms_objects[-1]
+
+                        lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+str(i)+"_"+atom)
+                        gpencil_layer = lone_pairs_data.layers.new(name="LP", set_active=True)
+                        frame = gpencil_layer.frames.new(context.scene.frame_current)
+                        lone_pairs = bpy.data.objects.new("lonepair_"+str(i)+"_"+atom, lone_pairs_data)
+                        lone_pairs.parent = obj
+                        mat = addBlackMaterial()
+                        lone_pairs_data.materials.append(mat)
+                        atom_collection.objects.link(lone_pairs)
+
+                        stroke = frame.strokes.new()
+                        stroke.display_mode = '3DSPACE'
+                        stroke.line_width = 40 
+                        stroke.points.add(count=1)
+
+                        #For some reason, only the Z
+                        #works with the constraint as up
+                        stroke.points[0].co = Vector((-0.07,0,0.25))
+
+                        stroke = frame.strokes.new()
+                        stroke.display_mode = '3DSPACE'
+                        stroke.line_width = 40 
+                        stroke.points.add(count=1)
+                        stroke.points[0].co = Vector((0.07,0,0.25))
+
+                        lone_pair_objects.append(lone_pairs)
+
+                        constraint = lone_pairs.constraints.new(type="TRACK_TO")
+                        constraint.target = const_target
+
+                    print(f"Made {i} lone pairs for {atom}")
+                    print(f"Bonded atoms {bonded_atoms_objects}")
+                    #break
 
         return {'FINISHED'}
 
@@ -295,14 +415,6 @@ class CreatorPanel(bpy.types.Panel):
         layout.prop(props, "order")
         layout.operator("object.generate_bond", icon="ACTION")
         
-# def showLonePairs(self, context):
-#     should_render = self.lone_pair
-#     for obj in bpy.data.objects:
-#         if obj.name.startswith("lonepair_"):
-#             obj.hide_render = not should_render
-#             obj.hide_viewport = not should_render
-#             obj.hide_select = not should_render
-
 def findCollection (collection):
     for col in bpy.data.collections:
             if col.name == collection:
@@ -584,8 +696,7 @@ def addBond(atom1, atom2, name, order):
     track_to2.target = bpy.data.objects[atom1]
     track_to2.up_axis = "UP_X"
     track_to2.track_axis = "TRACK_Y"
-    
-    
+       
 def read_cml_file(context, filepath, use_some_setting):
     print("reading file...")
     f = open(filepath, 'r', encoding='utf-8')
