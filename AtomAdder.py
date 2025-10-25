@@ -192,12 +192,28 @@ class ToggleLonePairs(bpy.types.Operator):
 
     should_render = False
 
-    def getBondNumber(self, atom):
+    def getBondNumber(self, atom, context):
         num_bonds = 0
         for obj in bpy.data.collections['bonds'].objects:
             if atom in obj.name:
-                num_bonds = num_bonds + 1
-        
+                #Accounting for bond order
+                tmp = obj.name.split("_")
+
+                order = int(tmp[2][1])
+
+                num_bonds = num_bonds + order
+               
+
+        #Accounting for hydrogens
+        hydrogens = 0
+        for child in bpy.context.scene.objects[atom].children:
+            if "_H" in child.name:
+                hydrogens = 1
+            if "_sub" in child.name:
+                hydrogens = int(child.data.body)
+
+        num_bonds = num_bonds + hydrogens
+        print(f"atom {atom} has {num_bonds} with order {order}")
         return num_bonds
 
     def getBondedAtoms(self, atom):
@@ -212,7 +228,7 @@ class ToggleLonePairs(bpy.types.Operator):
         #cleaned_up = list(set(bonded_atoms))
         return bonded_atoms
 
-    def showSelectedLonePairs(self, selected_objects, should_render, context):
+    def old__showSelectedLonePairs(self, selected_objects, should_render, context):
         obj_lps = 0
 
         for parent in selected_objects:
@@ -229,9 +245,9 @@ class ToggleLonePairs(bpy.types.Operator):
             for obj in selected_objects:
                 self.handleLonePairs(obj.name, context)
 
-    def handleLonePairs(self, atom, context):
+    def old__handleLonePairs(self, atom, context):
 
-        num_bonds = self.getBondNumber(atom)
+        num_bonds = self.getBondNumber(atom, context)
         num_lone_pairs = 0
         print(num_bonds)
         atom_object = bpy.data.objects[atom]
@@ -275,7 +291,6 @@ class ToggleLonePairs(bpy.types.Operator):
         #AND atom types (N, C, S even, O)
             
         return
-        
 
     def execute (self, context):
         selected_objects = context.selected_objects
@@ -308,9 +323,8 @@ class ToggleLonePairs(bpy.types.Operator):
         #If lone pairs have not been generated
         if obj_lps == 0:
             for obj in selected_objects:
-                #self.handleLonePairs(obj.name, context)
-
-                num_bonds = self.getBondNumber(obj.name)
+                num_bonds = 0
+                num_bonds = self.getBondNumber(obj.name, context)
                 num_lone_pairs = 0
                 print(f"bonds {num_bonds} and lonepairs {obj_lps} for {obj.name}")
                 # atom_object = bpy.data.objects[atom]
@@ -319,7 +333,6 @@ class ToggleLonePairs(bpy.types.Operator):
                     atom_collection = obj.users_collection[0]
 
                 atom_type = atom_collection.name
-
 
                 if num_bonds == 0:
                     num_lone_pairs = 4
@@ -349,20 +362,107 @@ class ToggleLonePairs(bpy.types.Operator):
                 
                 lone_pair_objects = []
 
+                const_target=bonded_atoms_objects[0]
                 #Looks like I need to handle lone pairs
                 #separately based on the bonding
-                if num_lone_pairs == 2:
-                    for i in range (0, num_lone_pairs):
-                        const_target = None
-                        # if i < len(bonded_atoms_objects):
-                        const_target=bonded_atoms_objects[i]
-                        # else:
-                        #     const_target=bonded_atoms_objects[-1]
+                
+                #Basically, I'm only going to handle lone
+                #pairs for oxygen and nitrogen. 
+                if atom_type != 'C':
 
-                        lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+str(i)+"_"+atom)
+                    #This is an incredibly verbose way to do
+                    #this but I have very specific things that
+                    #need to be draw for each scenario
+                    if num_lone_pairs == 3:
+                            
+                            #Create the lone pair object
+                            lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+atom)
+                            gpencil_layer = lone_pairs_data.layers.new(name="LP", set_active=True)
+                            frame = gpencil_layer.frames.new(context.scene.frame_current)
+                            lone_pairs = bpy.data.objects.new("lonepair_"+atom, lone_pairs_data)
+                            lone_pairs.parent = obj
+                            mat = addBlackMaterial()
+                            lone_pairs_data.materials.append(mat)
+                            atom_collection.objects.link(lone_pairs)
+
+                            #draw the lone pairs
+                            #Top Pair
+                            stroke = frame.strokes.new()
+                            stroke.display_mode = '3DSPACE'
+                            stroke.line_width = 40 
+                            stroke.points.add(count=1)
+                            stroke.points[0].co = Vector((-0.07,0,0.25))
+                            stroke = frame.strokes.new()
+                            stroke.display_mode = '3DSPACE'
+                            stroke.line_width = 40 
+                            stroke.points.add(count=1)
+                            stroke.points[0].co = Vector((0.07,0,0.25))
+
+                            #Left Pair
+                            stroke = frame.strokes.new()
+                            stroke.display_mode = '3DSPACE'
+                            stroke.line_width = 40 
+                            stroke.points.add(count=1)
+                            stroke.points[0].co = Vector((0.25,0,0.07))
+                            stroke = frame.strokes.new()
+                            stroke.display_mode = '3DSPACE'
+                            stroke.line_width = 40 
+                            stroke.points.add(count=1)
+                            stroke.points[0].co = Vector((0.25,0,-0.07))
+
+                            #Right Pair
+                            stroke = frame.strokes.new()
+                            stroke.display_mode = '3DSPACE'
+                            stroke.line_width = 40 
+                            stroke.points.add(count=1)
+                            stroke.points[0].co = Vector((-0.25,0,0.07))
+                            stroke = frame.strokes.new()
+                            stroke.display_mode = '3DSPACE'
+                            stroke.line_width = 40 
+                            stroke.points.add(count=1)
+                            stroke.points[0].co = Vector((-0.25,0,-0.07))
+
+
+                            constraint = lone_pairs.constraints.new(type="TRACK_TO")
+                            constraint.target = const_target
+
+                    elif num_lone_pairs == 2:
+                        for i in range (0, num_lone_pairs):
+                            const_target=bonded_atoms_objects[i]
+                            lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+str(i)+"_"+atom)
+                            gpencil_layer = lone_pairs_data.layers.new(name="LP", set_active=True)
+                            frame = gpencil_layer.frames.new(context.scene.frame_current)
+                            lone_pairs = bpy.data.objects.new("lonepair_"+str(i)+"_"+atom, lone_pairs_data)
+                            lone_pairs.parent = obj
+                            mat = addBlackMaterial()
+                            lone_pairs_data.materials.append(mat)
+                            atom_collection.objects.link(lone_pairs)
+
+                            stroke = frame.strokes.new()
+                            stroke.display_mode = '3DSPACE'
+                            stroke.line_width = 40 
+                            stroke.points.add(count=1)
+
+                            #For some reason, only the Z
+                            #works with the constraint as up
+                            stroke.points[0].co = Vector((-0.07,0,0.25))
+
+                            stroke = frame.strokes.new()
+                            stroke.display_mode = '3DSPACE'
+                            stroke.line_width = 40 
+                            stroke.points.add(count=1)
+                            stroke.points[0].co = Vector((0.07,0,0.25))
+
+                            lone_pair_objects.append(lone_pairs)
+
+                            constraint = lone_pairs.constraints.new(type="TRACK_TO")
+                            constraint.target = const_target
+
+                    elif num_lone_pairs == 1:
+                        lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+atom)
                         gpencil_layer = lone_pairs_data.layers.new(name="LP", set_active=True)
                         frame = gpencil_layer.frames.new(context.scene.frame_current)
-                        lone_pairs = bpy.data.objects.new("lonepair_"+str(i)+"_"+atom, lone_pairs_data)
+                        lone_pairs = bpy.data.objects.new("lonepair_"+atom, lone_pairs_data)
                         lone_pairs.parent = obj
                         mat = addBlackMaterial()
                         lone_pairs_data.materials.append(mat)
@@ -383,22 +483,24 @@ class ToggleLonePairs(bpy.types.Operator):
                         stroke.points.add(count=1)
                         stroke.points[0].co = Vector((0.07,0,0.25))
 
-                        lone_pair_objects.append(lone_pairs)
-
                         constraint = lone_pairs.constraints.new(type="TRACK_TO")
                         constraint.target = const_target
 
-                    print(f"Made {i} lone pairs for {atom}")
-                    print(f"Bonded atoms {bonded_atoms_objects}")
+                        print(f"Bonded atoms {bonded_atoms_objects}")
                     #break
+
+
+                
+
 
         return {'FINISHED'}
 
 class CreatorPanel(bpy.types.Panel):
     bl_label = "Atom Animator"
-    bl_idname = "PT_CompoundPanel"
+    bl_idname = "VIEW3D_PT_CompoundPanel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
+    #bl_context = 'scene'
     bl_category = 'Atom Animator'
     
     def draw (self, context):
@@ -408,17 +510,20 @@ class CreatorPanel(bpy.types.Panel):
         row.label(text="Add Compound", icon='OUTLINER_OB_POINTCLOUD')
         row = layout.row()
         row.operator("import_cml.compound_data",icon='OUTLINER_DATA_POINTCLOUD')
-        row = layout.row()
-        layout.operator("object.toggle_lonepairs",icon="ACTION")
         
         row = layout.row()
         layout.label(text="Generate arrow")
         layout.operator("object.generate_arrow", icon="ACTION")
         
         row = layout.row()
+        layout.label(text="Bonding")
         props = context.scene.bond_order
         layout.prop(props, "order")
         layout.operator("object.generate_bond", icon="ACTION")
+
+        row = layout.row()
+        layout.label(text="Lone Pairs")
+        layout.operator("object.toggle_lonepairs",icon="ACTION")
         
 def findCollection (collection):
     for col in bpy.data.collections:
@@ -804,7 +909,6 @@ class ImportCML(Operator, ImportHelper):
 
     def execute(self, context):
          return read_cml_file(context, self.filepath, self.use_setting)
-
 
 # Only needed if you want to add into a dynamic menu
 def menu_func_import(self, context):
