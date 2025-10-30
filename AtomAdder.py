@@ -210,7 +210,6 @@ class ToggleLonePairs(bpy.types.Operator):
 
                 print(obj.name)
                
-
         #Accounting for hydrogens
         hydrogens = 0
         for child in bpy.context.scene.objects[atom].children:
