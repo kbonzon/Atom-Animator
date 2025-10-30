@@ -235,301 +235,152 @@ class ToggleLonePairs(bpy.types.Operator):
         #cleaned_up = list(set(bonded_atoms))
         return bonded_atoms
 
-    def old__showSelectedLonePairs(self, selected_objects, should_render, context):
-        obj_lps = 0
-
-        for parent in selected_objects:
-            for child in parent.children: 
-                if child.name.startswith("lonepair_"):
-                    obj_lps = obj_lps + 1
-
-                    child.hide_viewport = not should_render
-                    child.hide_render = not should_render
-                    child.hide_select = not should_render
+    def toggleVisibility(self, child, should_render):
+        should_render = child.hide_viewport
         
-        #If lone pairs have not been generated
-        if obj_lps == 0:
-            for obj in selected_objects:
-                self.handleLonePairs(obj.name, context)
+        should_render = not should_render
 
-    def old__handleLonePairs(self, atom, context):
+        child.hide_viewport = should_render
+        child.hide_render = should_render
+        child.hide_select = should_render
 
-        num_bonds = self.getBondNumber(atom, context)
+        if child.children:
+            for grand_child in child.children:
+                grand_child.hide_viewport = should_render
+                grand_child.hide_render = should_render
+                grand_child.hide_select = should_render
+
+    def handleLonePairs(self, obj, atom_collection, context, atoms_with_lone_pairs):
+        obj_lps = atoms_with_lone_pairs
+        num_bonds = 0
+        num_bonds = self.getBondNumber(obj.name, context)
         num_lone_pairs = 0
-        print(num_bonds)
-        atom_object = bpy.data.objects[atom]
+        print(f"bonds {num_bonds} and lonepairs {obj_lps} for {obj.name}")
+        # atom_object = bpy.data.objects[atom]
+
+        if obj.users_collection:
+            atom_collection = obj.users_collection[0]
+
+        atom_type = atom_collection.name
 
         if num_bonds == 0:
             num_lone_pairs = 4
         if num_bonds == 1:
             num_lone_pairs = 3
         if num_bonds == 2:
-            num_lone_pairs = 2
+            if atom_type == 'C':
+                num_lone_pairs = 1
+            if atom_type == 'O':
+                num_lone_pairs = 2
         if num_bonds == 3:
             num_lone_pairs = 1
         if num_bonds == 4:
             num_lone_pairs = 0
 
-        #Loop through each
-        for i in range (num_lone_pairs, 1):
-            lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+atom)
-            gpencil_layer = lone_pairs_data.layers.new(name="LP", set_active=True)
-            frame = gpencil_layer.frames.new(context.scene.frame_current)
-            lone_pairs = bpy.data.objects.new("lonepair_"+atom, lone_pairs_data)
-            lone_pairs.parent = atom_object
-            context.scene.collection.objects.link(lone_pairs)
+        atom = obj.name
+        bonded_atoms = self.getBondedAtoms(atom)
+        bonded_atoms_objects = []
 
-            break
-            
-        #OK so if there is only one bond, I need the lone pairs
-        #to find the atom it's parented to and track to it.
-        #I need three lone pairs opposite the bond
+        #This is a really janky way to do this I know
+        #I need to refactor this eventually
+        for bonded_atom in bonded_atoms:
+            for atom1 in bonded_atom:
+                for obj1 in bpy.context.scene.objects:
+                    if atom1 == obj1.name:
+                        bonded_atoms_objects.append(obj1)
+        
+        lone_pair_objects = []
 
-        #OK so for two bonds, I need it to find the atoms
-        #opposite the lone pairs, add a gpencil object for each
-        #and then do the track to thing again (up is Z and track
-        #axis is -Y). Set the influence to 0.75 too. 
+        const_target=bonded_atoms_objects[0]
+        #Looks like I need to handle lone pairs
+        #separately based on the bonding
+        
+        #Basically, I'm only going to handle lone
+        #pairs for oxygen and nitrogen. 
+        if atom_type != 'C':
 
-        #For three bonds, I think just pick a bond and do this
-
-        #All of this also needs to handle bond order ok this is 
-        #getting harder
-
-        #AND atom types (N, C, S even, O)
-            
-        return
-
-    def execute (self, context):
-        selected_objects = context.selected_objects
-
-        if len(selected_objects) == 0:
-            self.report({'ERROR'}, 'Please select at least one atom.')
-            return {'CANCELLED'}
-
-        #self.showSelectedLonePairs(selected_objects, True, context)
-
-        should_render = self.should_render
-
-        for obj in selected_objects:
-            obj_lps = 0
-            for child in obj.children: 
-                if child.name.startswith("lonepair_"):
-                    obj_lps = obj_lps + 1
-
-                    should_render = child.hide_viewport
+            #This is an incredibly verbose way to do
+            #this but I have very specific things that
+            #need to be draw for each scenario
+            if num_lone_pairs == 3:
                     
-                    should_render = not should_render
+                    #Create the lone pair object
+                    lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+atom)
+                    gpencil_layer = lone_pairs_data.layers.new(name="LP", set_active=True)
+                    frame = gpencil_layer.frames.new(context.scene.frame_current)
+                    lone_pairs = bpy.data.objects.new("lonepair_"+atom, lone_pairs_data)
+                    lone_pairs.parent = obj
+                    mat = addBlackMaterial()
+                    lone_pairs_data.materials.append(mat)
+                    atom_collection.objects.link(lone_pairs)
 
-                    child.hide_viewport = should_render
-                    child.hide_render = should_render
-                    child.hide_select = should_render
+                    #draw the lone pairs
+                    #Top Pair
+                    stroke = frame.strokes.new()
+                    stroke.display_mode = '3DSPACE'
+                    stroke.line_width = 40 
+                    stroke.points.add(count=1)
+                    stroke.points[0].co = Vector((-0.07,0,0.25))
+                    stroke = frame.strokes.new()
+                    stroke.display_mode = '3DSPACE'
+                    stroke.line_width = 40 
+                    stroke.points.add(count=1)
+                    stroke.points[0].co = Vector((0.07,0,0.25))
 
-                    for grand_child in child.children:
-                        grand_child.hide_viewport = should_render
-                        grand_child.hide_render = should_render
-                        grand_child.hide_select = should_render
+                    #Left Pair
+                    stroke = frame.strokes.new()
+                    stroke.display_mode = '3DSPACE'
+                    stroke.line_width = 40 
+                    stroke.points.add(count=1)
+                    stroke.points[0].co = Vector((0.25,0,0.07))
+                    stroke = frame.strokes.new()
+                    stroke.display_mode = '3DSPACE'
+                    stroke.line_width = 40 
+                    stroke.points.add(count=1)
+                    stroke.points[0].co = Vector((0.25,0,-0.07))
 
+                    #Right Pair
+                    stroke = frame.strokes.new()
+                    stroke.display_mode = '3DSPACE'
+                    stroke.line_width = 40 
+                    stroke.points.add(count=1)
+                    stroke.points[0].co = Vector((-0.25,0,0.07))
+                    stroke = frame.strokes.new()
+                    stroke.display_mode = '3DSPACE'
+                    stroke.line_width = 40 
+                    stroke.points.add(count=1)
+                    stroke.points[0].co = Vector((-0.25,0,-0.07))
 
-            print(f"Should render is {should_render}")
-            #If lone pairs have not been generated
-        if obj_lps == 0:
-            for obj in selected_objects:
-                num_bonds = 0
-                num_bonds = self.getBondNumber(obj.name, context)
-                num_lone_pairs = 0
-                print(f"bonds {num_bonds} and lonepairs {obj_lps} for {obj.name}")
-                # atom_object = bpy.data.objects[atom]
+                    constraint = lone_pairs.constraints.new(type="TRACK_TO")
+                    constraint.target = const_target
 
-                if obj.users_collection:
-                    atom_collection = obj.users_collection[0]
+                    #Creating the charge symbol
+                    charge_data = bpy.data.grease_pencils.new("chargeGP_"+atom)
+                    charge_layer = charge_data.layers.new(name="lonepair_charge", set_active=True)
+                    charge_frame = charge_layer.frames.new(context.scene.frame_current)
+                    charge = bpy.data.objects.new("lonepair_charge_"+atom, charge_data)
+                    charge.parent = obj
+                    charge.data.materials.append(mat)
+                    atom_collection.objects.link(charge)
+                    charge_stroke = charge_frame.strokes.new()
+                    charge_stroke.display_mode = '3DSPACE'
+                    charge_stroke.line_width = 40 
+                    charge_stroke.points.add(count=2)
+                    charge_stroke.points[0].co = Vector((0.25,0.12,0))
+                    charge_stroke.points[1].co = Vector((0.35,0.12,0))
 
-                atom_type = atom_collection.name
-
-                if num_bonds == 0:
-                    num_lone_pairs = 4
-                if num_bonds == 1:
-                    num_lone_pairs = 3
-                if num_bonds == 2:
-                    if atom_type == 'C':
-                        num_lone_pairs = 1
-                    if atom_type == 'O':
-                        num_lone_pairs = 2
-                if num_bonds == 3:
-                    num_lone_pairs = 1
-                if num_bonds == 4:
-                    num_lone_pairs = 0
-
-                atom = obj.name
-                bonded_atoms = self.getBondedAtoms(atom)
-                bonded_atoms_objects = []
-
-                #This is a really janky way to do this I know
-                #I need to refactor this eventually
-                for bonded_atom in bonded_atoms:
-                    for atom1 in bonded_atom:
-                        for obj1 in bpy.context.scene.objects:
-                            if atom1 == obj1.name:
-                                bonded_atoms_objects.append(obj1)
-                
-                lone_pair_objects = []
-
-                const_target=bonded_atoms_objects[0]
-                #Looks like I need to handle lone pairs
-                #separately based on the bonding
-                
-                #Basically, I'm only going to handle lone
-                #pairs for oxygen and nitrogen. 
-                if atom_type != 'C':
-
-                    #This is an incredibly verbose way to do
-                    #this but I have very specific things that
-                    #need to be draw for each scenario
-                    if num_lone_pairs == 3:
-                            
-                            #Create the lone pair object
-                            lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+atom)
-                            gpencil_layer = lone_pairs_data.layers.new(name="LP", set_active=True)
-                            frame = gpencil_layer.frames.new(context.scene.frame_current)
-                            lone_pairs = bpy.data.objects.new("lonepair_"+atom, lone_pairs_data)
-                            lone_pairs.parent = obj
-                            mat = addBlackMaterial()
-                            lone_pairs_data.materials.append(mat)
-                            atom_collection.objects.link(lone_pairs)
-
-                            #draw the lone pairs
-                            #Top Pair
-                            stroke = frame.strokes.new()
-                            stroke.display_mode = '3DSPACE'
-                            stroke.line_width = 40 
-                            stroke.points.add(count=1)
-                            stroke.points[0].co = Vector((-0.07,0,0.25))
-                            stroke = frame.strokes.new()
-                            stroke.display_mode = '3DSPACE'
-                            stroke.line_width = 40 
-                            stroke.points.add(count=1)
-                            stroke.points[0].co = Vector((0.07,0,0.25))
-
-                            #Left Pair
-                            stroke = frame.strokes.new()
-                            stroke.display_mode = '3DSPACE'
-                            stroke.line_width = 40 
-                            stroke.points.add(count=1)
-                            stroke.points[0].co = Vector((0.25,0,0.07))
-                            stroke = frame.strokes.new()
-                            stroke.display_mode = '3DSPACE'
-                            stroke.line_width = 40 
-                            stroke.points.add(count=1)
-                            stroke.points[0].co = Vector((0.25,0,-0.07))
-
-                            #Right Pair
-                            stroke = frame.strokes.new()
-                            stroke.display_mode = '3DSPACE'
-                            stroke.line_width = 40 
-                            stroke.points.add(count=1)
-                            stroke.points[0].co = Vector((-0.25,0,0.07))
-                            stroke = frame.strokes.new()
-                            stroke.display_mode = '3DSPACE'
-                            stroke.line_width = 40 
-                            stroke.points.add(count=1)
-                            stroke.points[0].co = Vector((-0.25,0,-0.07))
-
-                            constraint = lone_pairs.constraints.new(type="TRACK_TO")
-                            constraint.target = const_target
-
-                            #Creating the charge symbol
-                            charge_data = bpy.data.grease_pencils.new("chargeGP_"+atom)
-                            charge_layer = charge_data.layers.new(name="lonepair_charge", set_active=True)
-                            charge_frame = charge_layer.frames.new(context.scene.frame_current)
-                            charge = bpy.data.objects.new("lonepair_charge_"+atom, charge_data)
-                            charge.parent = obj
-                            charge.data.materials.append(mat)
-                            atom_collection.objects.link(charge)
-                            charge_stroke = charge_frame.strokes.new()
-                            charge_stroke.display_mode = '3DSPACE'
-                            charge_stroke.line_width = 40 
-                            charge_stroke.points.add(count=2)
-                            charge_stroke.points[0].co = Vector((0.25,0.12,0))
-                            charge_stroke.points[1].co = Vector((0.35,0.12,0))
-
-                            charge_constraint = charge.constraints.new(type="TRACK_TO")
-                            charge_constraint.target = const_target
-                            charge_constraint.track_axis = "TRACK_Y"
-                            charge_constraint.up_axis = "UP_Y"
-
-                    elif num_lone_pairs == 2:
-                        #Handling bond orders
-                        if len(bonded_atoms_objects) > 1:
-                            for i in range (0, num_lone_pairs):
-                                lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+str(i)+"_"+atom)
-                                gpencil_layer = lone_pairs_data.layers.new(name="LP", set_active=True)
-                                frame = gpencil_layer.frames.new(context.scene.frame_current)
-                                lone_pairs = bpy.data.objects.new("lonepair_"+str(i)+"_"+atom, lone_pairs_data)
-                                lone_pairs.parent = obj
-                                mat = addBlackMaterial()
-                                lone_pairs_data.materials.append(mat)
-                                atom_collection.objects.link(lone_pairs)
-
-                                stroke = frame.strokes.new()
-                                stroke.display_mode = '3DSPACE'
-                                stroke.line_width = 40 
-                                stroke.points.add(count=1)
-
-                                #For some reason, only the Z
-                                #works with the constraint as up
-                                stroke.points[0].co = Vector((-0.07,0,0.25))
-
-                                stroke = frame.strokes.new()
-                                stroke.display_mode = '3DSPACE'
-                                stroke.line_width = 40 
-                                stroke.points.add(count=1)
-                                stroke.points[0].co = Vector((0.07,0,0.25))
-
-                                lone_pair_objects.append(lone_pairs)
-
-                                const_target=bonded_atoms_objects[i]
-                                constraint = lone_pairs.constraints.new(type="TRACK_TO")
-                                constraint.target = const_target
-                        else:
-                                lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+atom)
-                                gpencil_layer = lone_pairs_data.layers.new(name="LP", set_active=True)
-                                frame = gpencil_layer.frames.new(context.scene.frame_current)
-                                lone_pairs = bpy.data.objects.new("lonepair_"+atom, lone_pairs_data)
-                                lone_pairs.parent = obj
-                                mat = addBlackMaterial()
-                                lone_pairs_data.materials.append(mat)
-                                atom_collection.objects.link(lone_pairs)
-
-                                stroke = frame.strokes.new()
-                                stroke.display_mode = '3DSPACE'
-                                stroke.line_width = 40 
-                                stroke.points.add(count=1)
-                                stroke.points[0].co = Vector((-0.2,0,0.15))
-                                stroke = frame.strokes.new()
-                                stroke.line_width = 40 
-                                stroke.points.add(count=1)
-                                stroke.points[0].co = Vector((-0.25,0,0))
-                                stroke = frame.strokes.new()
-                                stroke.display_mode = '3DSPACE'
-                                stroke.line_width = 40 
-                                stroke.points.add(count=1)
-                                stroke.points[0].co = Vector((0.2,0,0.15))
-                                stroke = frame.strokes.new()
-                                stroke.line_width = 40 
-                                stroke.points.add(count=1)
-                                stroke.points[0].co = Vector((0.25,0,0))
-
-                                const_target=bonded_atoms_objects[0]
-                                constraint = lone_pairs.constraints.new(type="TRACK_TO")
-                                constraint.target = const_target
-                                # constraint.track_axis = "TRACK_Y"
-                                # constraint.up_axis = "UP_Y"
-
-
-                    elif num_lone_pairs == 1:
-                        lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+atom)
+                    charge_constraint = charge.constraints.new(type="TRACK_TO")
+                    charge_constraint.target = const_target
+                    charge_constraint.track_axis = "TRACK_Y"
+                    charge_constraint.up_axis = "UP_Y"
+            elif num_lone_pairs == 2:
+                #Handling bond orders
+                if len(bonded_atoms_objects) > 1:
+                    for i in range (0, num_lone_pairs):
+                        lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+str(i)+"_"+atom)
                         gpencil_layer = lone_pairs_data.layers.new(name="LP", set_active=True)
                         frame = gpencil_layer.frames.new(context.scene.frame_current)
-                        lone_pairs = bpy.data.objects.new("lonepair_"+atom, lone_pairs_data)
+                        lone_pairs = bpy.data.objects.new("lonepair_"+str(i)+"_"+atom, lone_pairs_data)
                         lone_pairs.parent = obj
                         mat = addBlackMaterial()
                         lone_pairs_data.materials.append(mat)
@@ -550,14 +401,119 @@ class ToggleLonePairs(bpy.types.Operator):
                         stroke.points.add(count=1)
                         stroke.points[0].co = Vector((0.07,0,0.25))
 
+                        lone_pair_objects.append(lone_pairs)
+
+                        const_target=bonded_atoms_objects[i]
                         constraint = lone_pairs.constraints.new(type="TRACK_TO")
                         constraint.target = const_target
+                else:
+                        lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+atom)
+                        gpencil_layer = lone_pairs_data.layers.new(name="LP", set_active=True)
+                        frame = gpencil_layer.frames.new(context.scene.frame_current)
+                        lone_pairs = bpy.data.objects.new("lonepair_"+atom, lone_pairs_data)
+                        lone_pairs.parent = obj
+                        mat = addBlackMaterial()
+                        lone_pairs_data.materials.append(mat)
+                        atom_collection.objects.link(lone_pairs)
 
-                        print(f"Bonded atoms {bonded_atoms_objects}")
-                        #break
+                        stroke = frame.strokes.new()
+                        stroke.display_mode = '3DSPACE'
+                        stroke.line_width = 40 
+                        stroke.points.add(count=1)
+                        stroke.points[0].co = Vector((-0.2,0,0.15))
+                        stroke = frame.strokes.new()
+                        stroke.line_width = 40 
+                        stroke.points.add(count=1)
+                        stroke.points[0].co = Vector((-0.25,0,0))
+                        stroke = frame.strokes.new()
+                        stroke.display_mode = '3DSPACE'
+                        stroke.line_width = 40 
+                        stroke.points.add(count=1)
+                        stroke.points[0].co = Vector((0.2,0,0.15))
+                        stroke = frame.strokes.new()
+                        stroke.line_width = 40 
+                        stroke.points.add(count=1)
+                        stroke.points[0].co = Vector((0.25,0,0))
+
+                        const_target=bonded_atoms_objects[0]
+                        constraint = lone_pairs.constraints.new(type="TRACK_TO")
+                        constraint.target = const_target
+                        # constraint.track_axis = "TRACK_Y"
+                        # constraint.up_axis = "UP_Y"
+            elif num_lone_pairs == 1:
+                lone_pairs_data = bpy.data.grease_pencils.new("lonepairGP_"+atom)
+                gpencil_layer = lone_pairs_data.layers.new(name="LP", set_active=True)
+                frame = gpencil_layer.frames.new(context.scene.frame_current)
+                lone_pairs = bpy.data.objects.new("lonepair_"+atom, lone_pairs_data)
+                lone_pairs.parent = obj
+                mat = addBlackMaterial()
+                lone_pairs_data.materials.append(mat)
+                atom_collection.objects.link(lone_pairs)
+
+                stroke = frame.strokes.new()
+                stroke.display_mode = '3DSPACE'
+                stroke.line_width = 40 
+                stroke.points.add(count=1)
+
+                #For some reason, only the Z
+                #works with the constraint as up
+                stroke.points[0].co = Vector((-0.07,0,0.25))
+
+                stroke = frame.strokes.new()
+                stroke.display_mode = '3DSPACE'
+                stroke.line_width = 40 
+                stroke.points.add(count=1)
+                stroke.points[0].co = Vector((0.07,0,0.25))
+
+                constraint = lone_pairs.constraints.new(type="TRACK_TO")
+                constraint.target = const_target
+
+                print(f"Bonded atoms {bonded_atoms_objects}")
+
+        #OK so if there is only one bond, I need the lone pairs
+        #to find the atom it's parented to and track to it.
+        #I need three lone pairs opposite the bond
+
+        #OK so for two bonds, I need it to find the atoms
+        #opposite the lone pairs, add a gpencil object for each
+        #and then do the track to thing again (up is Z and track
+        #axis is -Y). Set the influence to 0.75 too. 
+
+        #For three bonds, I think just pick a bond and do this
+
+        #All of this also needs to handle bond order ok this is 
+        #getting harder
+
+        #AND atom types (N, C, S even, O)
+            
+
+    def execute (self, context):
+        selected_objects = context.selected_objects
+
+        if len(selected_objects) == 0:
+            self.report({'ERROR'}, 'Please select at least one atom.')
+            return {'CANCELLED'}
+
+        #self.showSelectedLonePairs(selected_objects, True, context)
+
+        should_render = self.should_render
+
+        for obj in selected_objects:
+            obj_lps = 0
+            for child in obj.children: 
+                if child.name.startswith("lonepair_"):
+                    obj_lps = obj_lps + 1
+
+                    self.toggleVisibility(child, should_render)       
+
+                print(f"Should render is {should_render}")
+                
+            #If lone pairs have not been generated
+            if obj_lps == 0:
+                self.handleLonePairs(obj, context.scene.collection, context, obj_lps)
 
 
-                    
+                
 
 
         return {'FINISHED'}
