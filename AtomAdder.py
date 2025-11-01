@@ -196,6 +196,16 @@ class ToggleLonePairs(bpy.types.Operator):
 
     should_render = False
 
+    # def getNumHydrogens(self, atom, context):
+    #     hydrogens = 0
+    #     for child in atom.children:
+    #         if "_H" in child.name and "_Halo" not in child.name:
+    #             hydrogens = 1
+    #         if "_sub" in child.name:
+    #             hydrogens = int(child.data.body)
+
+    #     return hydrogens
+
     def getBondNumber(self, atom, context):
         num_bonds = 0
         order = 0
@@ -282,15 +292,19 @@ class ToggleLonePairs(bpy.types.Operator):
 
         #This is a really janky way to do this I know
         #I need to refactor this eventually
-        for bonded_atom in bonded_atoms:
-            for atom1 in bonded_atom:
-                for obj1 in bpy.context.scene.objects:
-                    if atom1 == obj1.name:
-                        bonded_atoms_objects.append(obj1)
-        
-        lone_pair_objects = []
 
-        const_target=bonded_atoms_objects[0]
+        try:
+            for bonded_atom in bonded_atoms:
+                for atom1 in bonded_atom:
+                    for obj1 in bpy.context.scene.objects:
+                        if atom1 == obj1.name:
+                            bonded_atoms_objects.append(obj1)
+            
+            lone_pair_objects = []
+
+            const_target=bonded_atoms_objects[0]
+        except IndexError:
+            self.report({"INFO"}, "No bonded heavy atoms detected. Bonded atoms are likely hydrogens")
         #Looks like I need to handle lone pairs
         #separately based on the bonding
         
@@ -300,7 +314,7 @@ class ToggleLonePairs(bpy.types.Operator):
 
             #This is an incredibly verbose way to do
             #this but I have very specific things that
-            #need to be draw for each scenario
+            #need to be drawn for each scenario
             if num_lone_pairs == 3:
                     
                     #Create the lone pair object
@@ -434,9 +448,17 @@ class ToggleLonePairs(bpy.types.Operator):
                         stroke.points.add(count=1)
                         stroke.points[0].co = Vector((0.25,0,0))
 
-                        const_target=bonded_atoms_objects[0]
-                        constraint = lone_pairs.constraints.new(type="TRACK_TO")
-                        constraint.target = const_target
+                        #Incase the bonded atoms are hydrogens    
+                        try:
+                            const_target=bonded_atoms_objects[0]
+                            constraint = lone_pairs.constraints.new(type="TRACK_TO")
+                            constraint.target = const_target
+
+                        except IndexError:
+                            lone_pairs.rotation_mode = 'XYZ'
+
+                            lone_pairs.rotation_euler = (math.radians(90), 0 ,math.radians(-90))
+
                         # constraint.track_axis = "TRACK_Y"
                         # constraint.up_axis = "UP_Y"
             elif num_lone_pairs == 1:
@@ -517,6 +539,30 @@ class ToggleLonePairs(bpy.types.Operator):
 
         return {'FINISHED'}
 
+class MakeAtom (bpy.types.Operator):
+    bl_idname = "object.create_atom"
+    bl_label = "Insert Atom"
+
+    def execute(self, context):
+        cursor = bpy.context.scene.cursor.location
+
+        atom_choice = context.scene.atom_choice
+
+        match atom_choice:
+            case 'C':
+                addAtom(x=cursor.x, y=cursor.y, atom='C', id=f"C_{random.randint(0,30)}", hydrogens=4)
+            case 'O':
+                addAtom(x=cursor.x, y=cursor.y, atom='O', id=f"O_{random.randint(0,30)}", hydrogens=2)
+            case 'N':
+                addAtom(x=cursor.x, y=cursor.y, atom='N', id=f"N_{random.randint(0,30)}", hydrogens=0)
+            case 'H':
+                addAtom(x=cursor.x, y=cursor.y, atom='H', id=f"H_{random.randint(0,30)}", hydrogens=0)
+            case 'S':
+                addAtom(x=cursor.x, y=cursor.y, atom='S', id=f"S_{random.randint(0,30)}", hydrogens=0)
+        return {'FINISHED'}
+
+
+
 class CreatorPanel(bpy.types.Panel):
     bl_label = "Atom Animator"
     bl_idname = "VIEW3D_PT_CompoundPanel"
@@ -546,6 +592,12 @@ class CreatorPanel(bpy.types.Panel):
         row = layout.row()
         layout.label(text="Lone Pairs")
         layout.operator("object.toggle_lonepairs",icon="ACTION")
+
+        row = layout.row()
+        layout.label(text="Manual Atom Generation")
+        layout.prop(context.scene, "atom_choice")
+        row = layout.row()
+        layout.operator("object.create_atom",icon="ACTION")
         
 def findCollection (collection):
     for col in bpy.data.collections:
@@ -940,6 +992,19 @@ def menu_func_import(self, context):
 
 # Register and add to the "file selector" menu (required to use F3 search "Text Import Operator" for quick access)
 def register():
+
+    bpy.types.Scene.atom_choice =  bpy.props.EnumProperty(
+        name = "Atom",
+        items = [
+            ('C', 'Carbon', 'Insert Carbon Atom'),
+            ('O', "Oxygen", 'Insert Oxygen'),
+            ('N', 'Nitrogen', 'Insert Nitrogen'),
+            ('H', 'Hydrogen', 'Insert Hydrogen'),
+            ('S', 'Sulfur', 'Insert Sulfur'),
+        ],
+        default = 'C'
+    )
+    bpy.utils.register_class(MakeAtom)
     bpy.utils.register_class(CreateArrow) 
     bpy.utils.register_class(CreatorPanel)
     bpy.utils.register_class(ImportCML)
@@ -951,19 +1016,17 @@ def register():
 
 
 def unregister():
+    bpy.utils.unregister_class(MakeAtom)
     bpy.utils.unregister_class(CreateArrow) 
     bpy.utils.unregister_class(CreatorPanel)
     bpy.utils.unregister_class(ImportCML)
     bpy.utils.unregister_class(ToggleLonePairs)
-
-    for cls in classes:
-        bpy.utils.unregister_class(cls)
-
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
     
     del bpy.types.Scene.lone_pair
     del bpy.types.Scene.lone_pair_selected
     del bpy.types.Scene.bond_order
+    del bpy.types.Scene.atom_choice
     bpy.utils.unregister_class(MakeBond)
     bpy.utils.unregister_class(BondOrder)
 
