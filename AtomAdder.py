@@ -1,8 +1,8 @@
 bl_info = {
     "name": "Compound Creator",
     "author": "Tim Bonzon",
-    "version": (1.3, 1.3),
-    "blender": (2, 80, 0),
+    "version": (1.4, 1.4),
+    "blender": (3, 50, 0),
     "location": "View3d > Toolbar",
     "description": "Adds a chemical compound from CML file",
     "warning": "",
@@ -30,6 +30,13 @@ class BondOrder (bpy.types.PropertyGroup):
         name = "Bond Order",
         description="Bond order for newly created bonds. (1-3)",
         default=1, min = 1, soft_max=3
+    )
+
+class LineThickness (bpy.types.PropertyGroup):
+    line_thickness : IntProperty(
+        name = "Line Thickness",
+        description="Thickness of bonds",
+        default=50
     )
 
 class MakeBond(bpy.types.Operator):
@@ -65,6 +72,7 @@ class CreateArrow(bpy.types.Operator):
         return (1-t)**2 * p0 + 2 * (1-t)*t*p1 + t**2 * p2
 
     def execute (self, context):
+        thickness = context.scene.line_thickness_data.line_thickness
         arrow_collection = context.scene.collection
                     
         selected_objects = list(context.selected_objects)
@@ -111,7 +119,7 @@ class CreateArrow(bpy.types.Operator):
         frame = layer.frames.new(context.scene.frame_current)
         stroke = frame.strokes.new()
         stroke.display_mode = '3DSPACE'
-        stroke.line_width = 30
+        stroke.line_width = thickness
         num_points = 64
         
         pts = [self.bezier_point(p0, p1, p2, i /(num_points - 2)) for i in range(num_points)]
@@ -259,7 +267,7 @@ class ToggleLonePairs(bpy.types.Operator):
                 grand_child.hide_render = should_render
                 grand_child.hide_select = should_render
 
-    def handleLonePairs(self, obj, atom_collection, context, atoms_with_lone_pairs):
+    def handleLonePairs(self, obj, atom_collection, context, atoms_with_lone_pairs, thickness=40):
         obj_lps = atoms_with_lone_pairs
         num_bonds = 0
         num_bonds = self.getBondNumber(obj.name, context)
@@ -331,36 +339,36 @@ class ToggleLonePairs(bpy.types.Operator):
                     #Top Pair
                     stroke = frame.strokes.new()
                     stroke.display_mode = '3DSPACE'
-                    stroke.line_width = 40 
+                    stroke.line_width = thickness 
                     stroke.points.add(count=1)
                     stroke.points[0].co = Vector((-0.07,0,0.25))
                     stroke = frame.strokes.new()
                     stroke.display_mode = '3DSPACE'
-                    stroke.line_width = 40 
+                    stroke.line_width = thickness 
                     stroke.points.add(count=1)
                     stroke.points[0].co = Vector((0.07,0,0.25))
 
                     #Left Pair
                     stroke = frame.strokes.new()
                     stroke.display_mode = '3DSPACE'
-                    stroke.line_width = 40 
+                    stroke.line_width = thickness 
                     stroke.points.add(count=1)
                     stroke.points[0].co = Vector((0.25,0,0.07))
                     stroke = frame.strokes.new()
                     stroke.display_mode = '3DSPACE'
-                    stroke.line_width = 40 
+                    stroke.line_width = thickness 
                     stroke.points.add(count=1)
                     stroke.points[0].co = Vector((0.25,0,-0.07))
 
                     #Right Pair
                     stroke = frame.strokes.new()
                     stroke.display_mode = '3DSPACE'
-                    stroke.line_width = 40 
+                    stroke.line_width = thickness 
                     stroke.points.add(count=1)
                     stroke.points[0].co = Vector((-0.25,0,0.07))
                     stroke = frame.strokes.new()
                     stroke.display_mode = '3DSPACE'
-                    stroke.line_width = 40 
+                    stroke.line_width = thickness 
                     stroke.points.add(count=1)
                     stroke.points[0].co = Vector((-0.25,0,-0.07))
 
@@ -377,7 +385,7 @@ class ToggleLonePairs(bpy.types.Operator):
                     atom_collection.objects.link(charge)
                     charge_stroke = charge_frame.strokes.new()
                     charge_stroke.display_mode = '3DSPACE'
-                    charge_stroke.line_width = 40 
+                    charge_stroke.line_width = thickness 
                     charge_stroke.points.add(count=2)
                     charge_stroke.points[0].co = Vector((0.25,0.12,0))
                     charge_stroke.points[1].co = Vector((0.35,0.12,0))
@@ -401,7 +409,7 @@ class ToggleLonePairs(bpy.types.Operator):
 
                         stroke = frame.strokes.new()
                         stroke.display_mode = '3DSPACE'
-                        stroke.line_width = 40 
+                        stroke.line_width = thickness 
                         stroke.points.add(count=1)
 
                         #For some reason, only the Z
@@ -410,7 +418,7 @@ class ToggleLonePairs(bpy.types.Operator):
 
                         stroke = frame.strokes.new()
                         stroke.display_mode = '3DSPACE'
-                        stroke.line_width = 40 
+                        stroke.line_width = thickness 
                         stroke.points.add(count=1)
                         stroke.points[0].co = Vector((0.07,0,0.25))
 
@@ -431,20 +439,20 @@ class ToggleLonePairs(bpy.types.Operator):
 
                         stroke = frame.strokes.new()
                         stroke.display_mode = '3DSPACE'
-                        stroke.line_width = 40 
+                        stroke.line_width = thickness 
                         stroke.points.add(count=1)
                         stroke.points[0].co = Vector((-0.2,0,0.15))
                         stroke = frame.strokes.new()
-                        stroke.line_width = 40 
+                        stroke.line_width = thickness 
                         stroke.points.add(count=1)
                         stroke.points[0].co = Vector((-0.25,0,0))
                         stroke = frame.strokes.new()
                         stroke.display_mode = '3DSPACE'
-                        stroke.line_width = 40 
+                        stroke.line_width = thickness 
                         stroke.points.add(count=1)
                         stroke.points[0].co = Vector((0.2,0,0.15))
                         stroke = frame.strokes.new()
-                        stroke.line_width = 40 
+                        stroke.line_width = thickness 
                         stroke.points.add(count=1)
                         stroke.points[0].co = Vector((0.25,0,0))
 
@@ -473,7 +481,7 @@ class ToggleLonePairs(bpy.types.Operator):
 
                 stroke = frame.strokes.new()
                 stroke.display_mode = '3DSPACE'
-                stroke.line_width = 40 
+                stroke.line_width = thickness 
                 stroke.points.add(count=1)
 
                 #For some reason, only the Z
@@ -482,7 +490,7 @@ class ToggleLonePairs(bpy.types.Operator):
 
                 stroke = frame.strokes.new()
                 stroke.display_mode = '3DSPACE'
-                stroke.line_width = 40 
+                stroke.line_width = thickness 
                 stroke.points.add(count=1)
                 stroke.points[0].co = Vector((0.07,0,0.25))
 
@@ -510,6 +518,7 @@ class ToggleLonePairs(bpy.types.Operator):
 
     def execute (self, context):
         selected_objects = context.selected_objects
+        line_thickness = context.scene.line_thickness_data.line_thickness
 
         if len(selected_objects) == 0:
             self.report({'ERROR'}, 'Please select at least one atom.')
@@ -531,7 +540,7 @@ class ToggleLonePairs(bpy.types.Operator):
                 
             #If lone pairs have not been generated
             if obj_lps == 0:
-                self.handleLonePairs(obj, context.scene.collection, context, obj_lps)
+                self.handleLonePairs(obj, context.scene.collection, context, obj_lps, thickness=line_thickness)
 
 
                 
@@ -561,8 +570,6 @@ class MakeAtom (bpy.types.Operator):
                 addAtom(x=cursor.x, y=cursor.y, atom='S', id=f"S_{random.randint(0,30)}", hydrogens=0)
         return {'FINISHED'}
 
-
-
 class CreatorPanel(bpy.types.Panel):
     bl_label = "Atom Animator"
     bl_idname = "VIEW3D_PT_CompoundPanel"
@@ -575,6 +582,8 @@ class CreatorPanel(bpy.types.Panel):
         layout = self.layout
         
         row = layout.row()
+        props = context.scene.line_thickness_data
+        layout.prop(props, 'line_thickness')
         row.label(text="Add Compound", icon='OUTLINER_OB_POINTCLOUD')
         row = layout.row()
         row.operator("import_cml.compound_data",icon='OUTLINER_DATA_POINTCLOUD')
@@ -711,7 +720,7 @@ def addAtom(x,y,atom,id, hydrogens=0):
     t.align_y = "CENTER"
     t_o = bpy.data.objects.new(id, t)
     t_o.location = [x, y, 0]
-    if hydrogens > 1:
+    if hydrogens > 0:
         
         #First, adding the actual letter
         h_text = bpy.data.curves.new(name=atom, type="FONT")
@@ -726,21 +735,21 @@ def addAtom(x,y,atom,id, hydrogens=0):
         h_text_o.location = [0, 0, 0]
         h_text_o.parent = t_o
         atom_collection.objects.link(h_text_o)
-        
-        #Now, handling subscripts
-        h = bpy.data.curves.new(name=atom, type="FONT")
-        h.body = str(hydrogens)
-        h.materials.append(addBlackMaterial())
-        h.size = 0.3
-        h.offset_x = 0.52
-        h.offset_y = -0.25
-        t.offset_x = -0.215
-        t.offset_y = -0.015
-        t.align_x = "LEFT"
-        h_o = bpy.data.objects.new(id+"_sub", h)
-        h_o.parent = t_o
-        h_o.location = [0, 0, 0]
-        atom_collection.objects.link(h_o)
+        if hydrogens > 1:
+            #Now, handling subscripts
+            h = bpy.data.curves.new(name=atom, type="FONT")
+            h.body = str(hydrogens)
+            h.materials.append(addBlackMaterial())
+            h.size = 0.3
+            h.offset_x = 0.52
+            h.offset_y = -0.25
+            t.offset_x = -0.215
+            t.offset_y = -0.015
+            t.align_x = "LEFT"
+            h_o = bpy.data.objects.new(id+"_sub", h)
+            h_o.parent = t_o
+            h_o.location = [0, 0, 0]
+            atom_collection.objects.link(h_o)
 
     t.body = atom
     #bpy.context.scene.collection.objects.link(t_o)
@@ -781,8 +790,8 @@ def draw_line(gp_frame, p0 : tuple, p1 : tuple):
     gp_stroke.points[1].co = p1 
     return gp_stroke
 
-def addBond(atom1, atom2, name, order):
-    
+def addBond(atom1, atom2, name, order, thickness=50):
+
      #grabbing the master collection
     
     master_collection = bpy.context.scene.collection
@@ -824,6 +833,7 @@ def addBond(atom1, atom2, name, order):
     bpy.ops.object.editmode_toggle()
     
     gp_data = bpy.data.grease_pencils.new(planeName + "_data")
+    gp_data.materials.append(addBlackMaterial())
     gp_object = bpy.data.objects.new(planeName, gp_data)
     bond_collection.objects.link(gp_object)
     
@@ -843,7 +853,7 @@ def addBond(atom1, atom2, name, order):
             draw_line(frame, (0,0,0),(1,0,0))
             draw_line(frame, (0,0,0.15),(1,0,0.15))
             
-    gpencil_layer.line_change = 50 
+    gpencil_layer.line_change = thickness
     bondPlane = bpy.data.objects[planeName]
     bondArma = bpy.data.objects[bondName]
     
@@ -882,71 +892,69 @@ def addBond(atom1, atom2, name, order):
     track_to2.up_axis = "UP_X"
     track_to2.track_axis = "TRACK_Y"
        
-def read_cml_file(context, filepath, use_some_setting):
-    print("reading file...")
-    f = open(filepath, 'r', encoding='utf-8')
-    file = Path(f.name)
-    fname = file.stem
-    data = f.readline()
-    
-    while data != "</molecule>\n" :
-         print(f"current line ={data}")
-         if "bond atomRefs2=" in data:
-             
-             #First, find the atoms involved in the bond
-             
-             atom1_tmp = data.split("atomRefs2=\"", 1)
-             atom1_tmp2 = atom1_tmp[1].split()
-             atom1 = atom1_tmp2[0] + fname
-             
-             atom2_tmp = data.split("\" i", 1)
-             atom2_tmp2 = atom2_tmp[0].split()
-             atom2_tmp3 = atom1_tmp2[1].split("\"",1)
-             atom2 = atom2_tmp3[0] + fname
-             
-             #Second, find the name of the bond
-             
-             bname_tmp = data.split("id=\"",1)
-             bname_tmp2 = bname_tmp[1].split("\"",1)
-             bname = bname_tmp2[0]
-             
-             #Third, find the bond order
-             
-             order_tmp = data.split("order=\"",1)
-             order_tmp2 = order_tmp[1].split("\"/",1)
-             order = order_tmp2[0]
-             
-             print("bonds at " + atom1 + " " + atom2 + " name " + bname + " order " + order)
-             addBond(atom1, atom2, bname, int(order))
-             
-         if "atom elementType" in data:
-             atom = data[19]
-             id_tmp = data.split("id=\"", 1)
-             id_tmp2 = id_tmp[1].split("\"",1)
-             id = id_tmp2[0]
-             count = 0
-             	                    
-             if "hydrogenCount" in data:
-                 count_tmp = data.split("hydrogenCount=\"", 1)
-                 count = int(count_tmp[1][0])
-                 print(f"count={count}")
-            
-             x_tmp = data.split("x2=\"",1)
-             x_tmp2 = x_tmp[1].split("\"", 1)
-             x_pos = x_tmp2[0]
-             x_pos = (float(x_pos) * 0.5) - 5
+def read_cml_file(context, filepath):
+    #grabbing line thickness
+    line_thickness = bpy.context.scene.line_thickness_data.line_thickness
 
-             y_tmp = data.split("y2=\"",1)
-             y_tmp2 = y_tmp[1].split("\"", 1)
-             y_pos = y_tmp2[0]
-             y_pos = float(y_pos) * 0.5
-             addAtom(x_pos, y_pos,atom,id+fname, count)
-             print(x_pos, " ,", y_pos)
-             
-         data = f.readline()
-    f.close()
+    print("reading file...") 
+    file = Path(filepath)   
+    fname = str(file.stem)
+    with open (filepath, 'r', encoding='utf8') as f :
+        #  fname_tmp = f.resolve()
+        #  fname_tmp1 = fname_tmp.split("\\",-1)
+         for data in f:
+            if "bond atomRefs2=" in data:
+                
+                #First, find the atoms involved in the bond
+                
+                atom1_tmp = data.split("atomRefs2=\"", 1)
+                atom1_tmp2 = atom1_tmp[1].split()
+                atom1 = atom1_tmp2[0] + fname
+                
+                atom2_tmp = data.split("\" i", 1)
+                atom2_tmp2 = atom2_tmp[0].split()
+                atom2_tmp3 = atom1_tmp2[1].split("\"",1)
+                atom2 = atom2_tmp3[0] + fname
+                
+                #Second, find the name of the bond
+                
+                bname_tmp = data.split("id=\"",1)
+                bname_tmp2 = bname_tmp[1].split("\"",1)
+                bname = bname_tmp2[0]+"_"+fname
+                
+                #Third, find the bond order
+                
+                order_tmp = data.split("order=\"",1)
+                order_tmp2 = order_tmp[1].split("\"/",1)
+                order = order_tmp2[0]
+                
+                print("bonds at " + atom1 + " " + atom2 + " name " + bname + " order " + order)
+                addBond(atom1, atom2, bname, int(order), thickness=line_thickness)
+                
+            if "atom elementType" in data:
+                atom = data[19]
+                id_tmp = data.split("id=\"", 1)
+                id_tmp2 = id_tmp[1].split("\"",1)
+                id = id_tmp2[0]
+                count = 0
+                                        
+                if "hydrogenCount" in data:
+                    count_tmp = data.split("hydrogenCount=\"", 1)
+                    count = int(count_tmp[1][0])
+                    print(f"count={count} for atom {atom} with id {id}")
+                
+                x_tmp = data.split("x2=\"",1)
+                x_tmp2 = x_tmp[1].split("\"", 1)
+                x_pos = x_tmp2[0]
+                x_pos = (float(x_pos) * 0.5) - 5
+
+                y_tmp = data.split("y2=\"",1)
+                y_tmp2 = y_tmp[1].split("\"", 1)
+                y_pos = y_tmp2[0]
+                y_pos = float(y_pos) * 0.5
+                addAtom(x_pos, y_pos,atom,id+fname, count)
+                print(x_pos, " ,", y_pos)
     # would normally load the data here
-    print(data)
 
     return {'FINISHED'}
 
@@ -957,33 +965,11 @@ class ImportCML(Operator, ImportHelper):
 
     # ImportHelper mixin class uses this
     filename_ext = ".cml"
-
-    filter_glob: StringProperty(
-        default="*.cml",
-        options={'HIDDEN'},
-        maxlen=255,  # Max internal buffer length, longer would be clamped.
-    )
-
     # List of operator properties, the attributes will be assigned
     # to the class instance from the operator settings before calling.
-    use_setting: BoolProperty(
-        name="Example Boolean",
-        description="Example Tooltip",
-        default=True,
-    )
-
-    type: EnumProperty(
-        name="Example Enum",
-        description="Choose between two items",
-        items=(
-            ('OPT_A', "First Option", "Description one"),
-            ('OPT_B', "Second Option", "Description two"),
-        ),
-        default='OPT_A',
-    )
-
+    
     def execute(self, context):
-         return read_cml_file(context, self.filepath, self.use_setting)
+         return read_cml_file(context, self.filepath)
 
 # Only needed if you want to add into a dynamic menu
 def menu_func_import(self, context):
@@ -1010,8 +996,10 @@ def register():
     bpy.utils.register_class(ImportCML)
     bpy.utils.register_class(MakeBond)
     bpy.utils.register_class(BondOrder)
+    bpy.utils.register_class(LineThickness)
     bpy.utils.register_class(ToggleLonePairs)
     bpy.types.Scene.bond_order = PointerProperty(type=BondOrder)
+    bpy.types.Scene.line_thickness_data = PointerProperty(type=LineThickness)
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
 
 
@@ -1027,6 +1015,7 @@ def unregister():
     del bpy.types.Scene.lone_pair_selected
     del bpy.types.Scene.bond_order
     del bpy.types.Scene.atom_choice
+    del bpy.types.Scene.line_thickness
     bpy.utils.unregister_class(MakeBond)
     bpy.utils.unregister_class(BondOrder)
 
