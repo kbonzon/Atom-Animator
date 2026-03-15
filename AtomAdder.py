@@ -792,6 +792,9 @@ def draw_line(gp_frame, p0 : tuple, p1 : tuple):
     return gp_stroke
 
 def addBond(atom1, atom2, name, order, thickness=50):
+    is_debug = atom1 == "a31reactants_2"
+    if is_debug:
+        print(f"Adding bond for {atom1} and {atom2}")
 
      #grabbing the master collection
     
@@ -837,11 +840,14 @@ def addBond(atom1, atom2, name, order, thickness=50):
     gp_data.materials.append(addBlackMaterial())
     gp_object = bpy.data.objects.new(planeName, gp_data)
     bond_collection.objects.link(gp_object)
+    if is_debug:
+        print(f"Adding bond for {atom1} and {atom2} made bond object")
     
     gpencil_layer = gp_data.layers.new(name, set_active=True)
     gpencil_layer.location[2] = -0.1
     frame = gpencil_layer.frames.new(0)
-    
+    if is_debug:
+        print(f"Adding bond for {atom1} and {atom2} made new frame")
     #Handling higher order bonds by drawing them off center
     if order <= 1: 
         draw_line(frame, (0,0,0),(1,0,0))
@@ -853,7 +859,9 @@ def addBond(atom1, atom2, name, order, thickness=50):
             draw_line(frame, (0,0,-0.15),(1,0,-0.15))
             draw_line(frame, (0,0,0),(1,0,0))
             draw_line(frame, (0,0,0.15),(1,0,0.15))
-            
+    
+    if is_debug:
+        print(f"Adding bond for {atom1} and {atom2} drew line")
     gpencil_layer.line_change = thickness
     bondPlane = bpy.data.objects[planeName]
     bondArma = bpy.data.objects[bondName]
@@ -868,6 +876,8 @@ def addBond(atom1, atom2, name, order, thickness=50):
     bondPlane.select_set(True)
     bpy.ops.object.parent_set(type='ARMATURE_AUTO', keep_transform=True)
     
+    if is_debug:
+        print(f"Adding bond for {atom1} and {atom2} parented bond plane")
     #Adding the armature constraints to the atoms
     #Only two bones are needed so we grab them here
     
@@ -936,7 +946,10 @@ def read_cml_file(context, filepath):
 
             order = int(atoms_[2].text)
 
-            addBond(atom_1, atom_2, id, int(order))
+            if order > 3:
+                order = 1
+
+            addBond(atom_1, atom_2, id, int(order), thickness=line_thickness)
     else:
         for data in lines:
             if "bond atomRefs2=" in data:
