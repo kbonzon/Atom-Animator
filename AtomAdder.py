@@ -17,6 +17,7 @@ import random
 import mathutils
 from mathutils import Vector
 from pathlib import Path
+import xml.etree.ElementTree as ET
 from bpy.props import IntProperty, PointerProperty
 # ImportHelper is a helper class, defines filename and
 # invoke() function which calls the file selector.
@@ -899,10 +900,45 @@ def read_cml_file(context, filepath):
     print("reading file...") 
     file = Path(filepath)   
     fname = str(file.stem)
+    lines = []
+    isChemSketch = False
     with open (filepath, 'r', encoding='utf8') as f :
-        #  fname_tmp = f.resolve()
-        #  fname_tmp1 = fname_tmp.split("\\",-1)
-         for data in f:
+        lines = f.readlines()
+        for line in lines:
+            if "convention=\"ACD/ChemSketch\"" in line:
+                print("ChemSketch detected")
+                isChemSketch = True
+                break
+    
+    if isChemSketch:
+        lines.clear()
+        root = ET.parse(filepath)
+
+        atoms = root.findall("atomArray/atom")
+        bonds = root.findall("bondArray/bond")
+
+        for atom in atoms:
+            id = atom.attrib["id"]
+
+            x_pos = float(atom.find("float[@builtin='x2']").text)
+            y_pos = float(atom.find("float[@builtin='y2']").text)
+
+            element = atom.find("string[@builtin='elementType']").text
+
+            addAtom(x_pos, y_pos,element,id+fname, 0)
+
+        for bond in bonds:
+            id = bond.attrib["id"]
+
+            atoms_ = bond.findall('string')
+            atom_1 = atoms_[1].text + fname
+            atom_2 = atoms_[0].text + fname
+
+            order = int(atoms_[2].text)
+
+            addBond(atom_1, atom_2, id, int(order))
+    else:
+        for data in lines:
             if "bond atomRefs2=" in data:
                 
                 #First, find the atoms involved in the bond
@@ -954,7 +990,7 @@ def read_cml_file(context, filepath):
                 y_pos = float(y_pos) * 0.5
                 addAtom(x_pos, y_pos,atom,id+fname, count)
                 print(x_pos, " ,", y_pos)
-    # would normally load the data here
+        # would normally load the data here
 
     return {'FINISHED'}
 
