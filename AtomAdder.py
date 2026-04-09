@@ -10,6 +10,11 @@ bl_info = {
     "category": "Add Mesh",
 }
 
+#TODO: Add the ability to make charges
+#TODO: Make bond constraints its own slider [DONE]
+#TODO: Add animatable visibility [DONE]
+#TODO: Handle aromatic bond drawing
+
 import bpy
 import math
 import bmesh
@@ -18,7 +23,7 @@ import mathutils
 from mathutils import Vector
 from pathlib import Path
 import xml.etree.ElementTree as ET
-from bpy.props import IntProperty, PointerProperty
+from bpy.props import IntProperty, PointerProperty, FloatProperty
 # ImportHelper is a helper class, defines filename and
 # invoke() function which calls the file selector.
 from bpy_extras.io_utils import ImportHelper
@@ -26,6 +31,128 @@ from bpy.types import GPencilFrame
 from bpy.props import StringProperty, BoolProperty, EnumProperty
 from bpy.types import Operator
 
+
+#NOTE: Current bond naming scheme:  "[atom1]_[atom2]_[BondID][ORDER]"
+class BondInfluenceProperty (bpy.types.PropertyGroup):
+    influence : FloatProperty(name="Bond Influence",
+                    description="Controls the bonding constraint between atoms",
+                    default=1.0,
+                    min=0,
+                    max=1.0,
+                    subtype="FACTOR")
+
+class BondInfluence (bpy.types.Operator):
+    bl_idname = "object.handle_bondinfluence"
+    bl_label = "Set Influence"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute (self, context):
+        influence = bpy.context.scene.bond_influence_property.influence
+
+        frame = context.scene.frame_current
+
+        #This is to get the selected objects in order
+
+        selected_objects = list(context.selected_objects)
+        active = context.view_layer.objects.active
+
+        if len (selected_objects) != 2:
+            self.report({'ERROR'}, "Please select exactly 2 atoms.")
+            return {'CANCELLED'}
+        
+        if active in selected_objects:
+            selected_objects.remove(active)
+            selected_objects.append(active)
+
+        atom2 = selected_objects[0].name
+        atom1 = selected_objects[1].name
+
+        print(f"Atom1: {atom1} Atom2 {atom2}")
+
+        bond = None
+
+        for obj in bpy.data.objects:
+            if atom1 in obj.name and atom2 in obj.name and obj.type == "ARMATURE":
+                bond = obj.name
+
+        if bond == None:
+            self.report({'ERROR'}, "No bond between atoms. Create a bond first.")
+            return {'CANCELLED'}
+        else:
+            print(f"Bond between {atom1} and {atom2} is {bond}")
+        
+        #Finding the bones
+
+        bone1 = bpy.data.objects[bond].pose.bones["Bone"]
+        bone2 = bpy.data.objects[bond].pose.bones["Bone.001"]
+
+        #Updating constraints
+        found_bone = False
+        for constraint in bone1.constraints:
+            if found_bone == False:
+                if atom1 in constraint.name:
+                    found_bone = True
+            
+            #So the bond doesn't fly off to the world origin
+            #Plot twist! We don't actually change the bond constraint, 
+            #just the self constratint
+            if "Self" in constraint.name and found_bone == True:
+                constraint.influence = 1 - influence
+                constraint.keyframe_insert(data_path="influence", frame=frame)
+
+        #Maybe we're not using that bone. Checking bone2    
+        if found_bone == False:
+            for constraint in bone2.constraints:
+                if atom1 in constraint.name:
+                    found_bone = True
+
+                if "Self" in constraint.name and found_bone == True:
+                    constraint.influence = 1 - influence
+                    constraint.keyframe_insert(data_path="influence", frame=frame)
+
+        return {"FINISHED"}
+
+class ChargeChoice(bpy.types.PropertyGroup):
+    charge : StringProperty(name="Charge", 
+                            description="Charge to add. Can be fractional, negative, or positive",
+                            default="+1"
+    )
+
+class AddCharge (bpy.types.Operator):
+    bl_idname = "object.add_charge"
+    bl_label = "Add Charge"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+
+        selected_objects = context.selected_objects
+
+        if len(selected_objects) == 0:
+            self.report({'ERROR'}, 'Select at least one atom')
+            return {'CANCELLED'}
+        
+        charge = context.scene.charge_choice_data.charge
+
+        for object in selected_objects:
+            #Create a text object
+            t = bpy.data.curves.new(name=object.name+"_chargedata_"+charge, type="FONT")
+            t.offset_x = 0.385
+            t.offset_y = 0.185
+            t.size = 0.5
+            t.materials.append(addBlackMaterial())
+            t.align_x = "CENTER"
+            t.align_y = "CENTER"
+            t.size = 0.25
+            t.body = charge
+            atom_collection = object.users_collection[0]
+
+            t_o = bpy.data.objects.new(object.name+"_charge_"+charge, t)
+            #t_o.location = [object.location.x, object.location.y, 0]
+            t_o.parent = object
+            atom_collection.objects.link(t_o)
+
+        return {'FINISHED'}
+    
 class BondOrder (bpy.types.PropertyGroup):
     order : IntProperty(
         name = "Bond Order",
@@ -63,6 +190,38 @@ class MakeBond(bpy.types.Operator):
         addBond(atom1, atom2, bond_name, order)
 
         return {'FINISHED'}
+
+class ToggleVisibility(bpy.types.Operator):
+    bl_idname = "object.disable_atom"
+    bl_label = "Toggle Visibility"
+    
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        frame = context.scene.frame_current
+        current_val = context.selected_objects[0].hide_render
+        new_val = not current_val
+
+        for obj in context.selected_objects:
+
+            obj.hide_render = new_val
+            if obj.hide_render:
+                obj.display_type = 'WIRE'
+            else:
+                obj.display_type = 'SOLID'
+            for child in obj.children:
+                child.hide_render = new_val
+                child.keyframe_insert(data_path="hide_render",
+                                      frame=frame)
+                
+                if child.hide_render:
+                    child.display_type = 'WIRE'
+                else:
+                    child.display_type = 'SOLID'
+                
+            obj.keyframe_insert(data_path="hide_render", frame=frame)
+
+        return {"FINISHED"}
 
 class CreateArrow(bpy.types.Operator):
     bl_idname = "object.generate_arrow"
@@ -290,6 +449,8 @@ class ToggleLonePairs(bpy.types.Operator):
                 num_lone_pairs = 1
             if atom_type == 'O':
                 num_lone_pairs = 2
+            else:
+                num_lone_pairs = 1
         if num_bonds == 3:
             num_lone_pairs = 1
         if num_bonds == 4:
@@ -549,6 +710,19 @@ class ToggleLonePairs(bpy.types.Operator):
 
         return {'FINISHED'}
 
+class AtomChoice (bpy.types.PropertyGroup):
+    atom_choice =  bpy.props.EnumProperty(
+    name = "Atom",
+    items = [
+        ('C', 'Carbon', 'Insert Carbon Atom'),
+        ('O', "Oxygen", 'Insert Oxygen'),
+        ('N', 'Nitrogen', 'Insert Nitrogen'),
+        ('H', 'Hydrogen', 'Insert Hydrogen'),
+        ('S', 'Sulfur', 'Insert Sulfur'),
+    ],
+    default = 'C'
+)
+
 class MakeAtom (bpy.types.Operator):
     bl_idname = "object.create_atom"
     bl_label = "Insert Atom"
@@ -591,23 +765,35 @@ class CreatorPanel(bpy.types.Panel):
         
         row = layout.row()
         layout.label(text="Generate arrow")
-        layout.operator("object.generate_arrow", icon="ACTION")
+        layout.operator("object.generate_arrow", icon="TRACKING_REFINE_FORWARDS")
         
         row = layout.row()
         layout.label(text="Bonding")
         props = context.scene.bond_order
         layout.prop(props, "order")
         layout.operator("object.generate_bond", icon="ACTION")
+        row=layout.row()
+        props = context.scene.bond_influence_property
+        layout.prop(props, "influence")
+        layout.operator("object.handle_bondinfluence", icon="AUTOMERGE_ON")
 
         row = layout.row()
-        layout.label(text="Lone Pairs")
+        layout.label(text="Lone Pairs and Charges")
         layout.operator("object.toggle_lonepairs",icon="ACTION")
+        row = layout.row()
+        props = context.scene.charge_choice_data
+        layout.prop(props, "charge")
+        layout.operator("object.add_charge",icon="FORCE_CHARGE")
 
         row = layout.row()
         layout.label(text="Manual Atom Generation")
         layout.prop(context.scene, "atom_choice")
         row = layout.row()
         layout.operator("object.create_atom",icon="ACTION")
+
+        row = layout.row()
+        layout.label(text="Animation Settings")
+        layout.operator("object.disable_atom",icon="HIDE_OFF")
         
 def findCollection (collection):
     for col in bpy.data.collections:
@@ -754,8 +940,7 @@ def addAtom(x,y,atom,id, hydrogens=0):
 
     t.body = atom
     #bpy.context.scene.collection.objects.link(t_o)
-    
-    
+
     #Setting the atom text    
     
     text = bpy.context.active_object
@@ -791,7 +976,7 @@ def draw_line(gp_frame, p0 : tuple, p1 : tuple):
     gp_stroke.points[1].co = p1 
     return gp_stroke
 
-def addBond(atom1, atom2, name, order, thickness=50):
+def addBond(atom1, atom2, name, order, thickness=50, aromatic=False):
     is_debug = atom1 == "a31reactants_2"
     if is_debug:
         print(f"Adding bond for {atom1} and {atom2}")
@@ -845,7 +1030,7 @@ def addBond(atom1, atom2, name, order, thickness=50):
     
     gpencil_layer = gp_data.layers.new(name, set_active=True)
     gpencil_layer.location[2] = -0.1
-    frame = gpencil_layer.frames.new(0)
+    frame = gpencil_layer.frames.new(bpy.context.scene.frame_current)
     if is_debug:
         print(f"Adding bond for {atom1} and {atom2} made new frame")
     #Handling higher order bonds by drawing them off center
@@ -886,7 +1071,21 @@ def addBond(atom1, atom2, name, order, thickness=50):
     
     #First, the constraint is applied to bone1
     copy_location1 = bone1.constraints.new(type="COPY_LOCATION")
+    copy_location1.name = "Bond to " + atom1
     copy_location1.target = bpy.data.objects[atom1]
+    
+    #Adding another zero-influence constraint for animating bonding
+    exists = False
+    for constraint in bone1.constraints:
+        if "Self" in constraint.name:
+            exists = True
+        
+    if exists == False:
+        self_location1 = bone1.constraints.new(type="COPY_LOCATION")
+        self_location1.name = "Self"
+        self_location1.target = bpy.data.objects[atom2]
+        self_location1.influence = 0
+
     #bpy.ops.pose.constraint_add(type='TRACK_TO')
     track_to1 =  bone1.constraints.new(type="TRACK_TO")
     track_to1.target = bpy.data.objects[atom2]
@@ -896,13 +1095,48 @@ def addBond(atom1, atom2, name, order, thickness=50):
     #The constraint is then applied to the second bone
   
     copy_location2 = bone2.constraints.new(type="COPY_LOCATION")
+    copy_location2.name = "Bond to " + atom2
     copy_location2.target = bpy.data.objects[atom2]
+
+    #Adding another zero-influence constraint for animating bonding
+    exists = False
+    for constraint in bone2.constraints:
+        if "Self" in constraint.name:
+            exists = True
+        
+    if exists == False:
+        self_location2 = bone2.constraints.new(type="COPY_LOCATION")
+        self_location2.name = "Self"
+        self_location2.target = bpy.data.objects[atom1]
+        self_location2.influence = 0
     #bpy.ops.pose.constraint_add(type='TRACK_TO')
     track_to2 =  bone2.constraints.new(type="TRACK_TO")
     track_to2.target = bpy.data.objects[atom1]
     track_to2.up_axis = "UP_X"
     track_to2.track_axis = "TRACK_Y"
-       
+    print(f"Added bond {atom1} to {atom2}")
+
+#TODO: implement this
+def aromatic_atoms(atoms):
+    data = atoms[0]
+    atoms.pop(0)
+    atom1_tmp = data.split("atomRefs2=\"", 1)
+    atom1_tmp2 = atom1_tmp[1].split()
+    atom1 = atom1_tmp2[0]
+    
+    atom2_tmp = data.split("\" i", 1)
+    atom2_tmp2 = atom2_tmp[0].split()
+    atom2_tmp3 = atom1_tmp2[1].split("\"",1)
+    atom2 = atom2_tmp3[0]
+
+    #get atom 1
+    #get atom 2
+    #get atom 3
+    #check if atom 3 bond to atom 1
+    #if yes, return atoms 1-3
+    #if no, continue
+    #if no atoms, return empty
+
 def read_cml_file(context, filepath):
     #grabbing line thickness
     line_thickness = bpy.context.scene.line_thickness_data.line_thickness
@@ -920,6 +1154,7 @@ def read_cml_file(context, filepath):
                 isChemSketch = True
                 break
     
+    #ChemSketch CMLs have to be handled differently
     if isChemSketch:
         lines.clear()
         root = ET.parse(filepath)
@@ -951,59 +1186,66 @@ def read_cml_file(context, filepath):
 
             addBond(atom_1, atom_2, id, int(order), thickness=line_thickness)
     else:
+        #Not the best way to handle XMLs, but convention-free
+        #seems to be best handled as a simple text file
+        bond_lines = []
+        atom_lines = []
         for data in lines:
             if "bond atomRefs2=" in data:
-                
-                #First, find the atoms involved in the bond
-                
-                atom1_tmp = data.split("atomRefs2=\"", 1)
-                atom1_tmp2 = atom1_tmp[1].split()
-                atom1 = atom1_tmp2[0] + fname
-                
-                atom2_tmp = data.split("\" i", 1)
-                atom2_tmp2 = atom2_tmp[0].split()
-                atom2_tmp3 = atom1_tmp2[1].split("\"",1)
-                atom2 = atom2_tmp3[0] + fname
-                
-                #Second, find the name of the bond
-                
-                bname_tmp = data.split("id=\"",1)
-                bname_tmp2 = bname_tmp[1].split("\"",1)
-                bname = bname_tmp2[0]+"_"+fname
-                
-                #Third, find the bond order
-                
-                order_tmp = data.split("order=\"",1)
-                order_tmp2 = order_tmp[1].split("\"/",1)
-                order = order_tmp2[0]
-                
-                print("bonds at " + atom1 + " " + atom2 + " name " + bname + " order " + order)
-                addBond(atom1, atom2, bname, int(order), thickness=line_thickness)
-                
+                bond_lines.append(data)
             if "atom elementType" in data:
-                atom = data[19]
-                id_tmp = data.split("id=\"", 1)
-                id_tmp2 = id_tmp[1].split("\"",1)
-                id = id_tmp2[0]
-                count = 0
-                                        
-                if "hydrogenCount" in data:
-                    count_tmp = data.split("hydrogenCount=\"", 1)
-                    count = int(count_tmp[1][0])
-                    print(f"count={count} for atom {atom} with id {id}")
-                
-                x_tmp = data.split("x2=\"",1)
-                x_tmp2 = x_tmp[1].split("\"", 1)
-                x_pos = x_tmp2[0]
-                x_pos = (float(x_pos) * 0.5) - 5
+                atom_lines.append(data)
+        
+        for data in atom_lines:
+            #Really not a good way to do this. 
+            atom_tmp1 = data.split("elementType=\"")
+            atom = atom_tmp1[1].split("\"")[0]
+            id_tmp = data.split("id=\"", 1)
+            id_tmp2 = id_tmp[1].split("\"",1)
+            id = id_tmp2[0]
+            
+            if "hydrogenCount" in data:
+                print("Hydrogens need to be handled")
+            
+            x_tmp = data.split("x2=\"",1)
+            x_tmp2 = x_tmp[1].split("\" ", 1)
+            x_pos = x_tmp2[0]
+            x_pos = (float(x_pos) * 0.5) - 5
 
-                y_tmp = data.split("y2=\"",1)
-                y_tmp2 = y_tmp[1].split("\"", 1)
-                y_pos = y_tmp2[0]
-                y_pos = float(y_pos) * 0.5
-                addAtom(x_pos, y_pos,atom,id+fname, count)
-                print(x_pos, " ,", y_pos)
-        # would normally load the data here
+            y_tmp = data.split("y2=\"",1)
+            y_tmp2 = y_tmp[1].split("\"", 1)
+            y_pos = y_tmp2[0]
+            y_pos = float(y_pos) * 0.5
+            addAtom(x_pos, y_pos,atom,id+fname)
+            print(x_pos, " ,", y_pos)
+
+        for data in bond_lines:
+            #First, find the atoms involved in the bond
+            atom1_tmp = data.split("atomRefs2=\"", 1)
+            atom1_tmp2 = atom1_tmp[1].split()
+            atom1 = atom1_tmp2[0] + fname
+            
+            atom2_tmp = data.split("\" i", 1)
+            atom2_tmp2 = atom2_tmp[0].split()
+            atom2_tmp3 = atom1_tmp2[1].split("\"",1)
+            atom2 = atom2_tmp3[0] + fname
+            
+            #Second, find the name of the bond
+            
+            bname_tmp = data.split("id=\"",1)
+            bname_tmp2 = bname_tmp[1].split("\"",1)
+            bname = bname_tmp2[0]
+            
+            #Third, find the bond order
+            
+            order_tmp = data.split("order=\"",1)
+            order_tmp2 = order_tmp[1].split("\"/",1)
+            order = order_tmp2[0]
+            
+            print("bonds at " + atom1 + " " + atom2 + " name " + bname + " order " + order)
+            addBond(atom1, atom2, bname, int(order))
+
+
 
     return {'FINISHED'}
 
@@ -1025,9 +1267,25 @@ def menu_func_import(self, context):
     
     self.layout.operator(ImportCML.bl_idname, text="Text Import Operator")
 
+classes = (
+    ChargeChoice,
+    AddCharge,
+    BondInfluence,
+    AtomChoice,
+    MakeAtom,
+    CreateArrow,
+    CreatorPanel,
+    ImportCML,
+    MakeBond,
+    BondOrder,
+    LineThickness,
+    ToggleLonePairs,
+    ToggleVisibility,
+    BondInfluenceProperty
+)
+
 # Register and add to the "file selector" menu (required to use F3 search "Text Import Operator" for quick access)
 def register():
-
     bpy.types.Scene.atom_choice =  bpy.props.EnumProperty(
         name = "Atom",
         items = [
@@ -1039,25 +1297,17 @@ def register():
         ],
         default = 'C'
     )
-    bpy.utils.register_class(MakeAtom)
-    bpy.utils.register_class(CreateArrow) 
-    bpy.utils.register_class(CreatorPanel)
-    bpy.utils.register_class(ImportCML)
-    bpy.utils.register_class(MakeBond)
-    bpy.utils.register_class(BondOrder)
-    bpy.utils.register_class(LineThickness)
-    bpy.utils.register_class(ToggleLonePairs)
+
+    for class_ in classes:
+            bpy.utils.register_class(class_)
     bpy.types.Scene.bond_order = PointerProperty(type=BondOrder)
     bpy.types.Scene.line_thickness_data = PointerProperty(type=LineThickness)
+    bpy.types.Scene.charge_choice_data = PointerProperty(type=ChargeChoice)
+    bpy.types.Scene.bond_influence_property = PointerProperty(type=BondInfluenceProperty)
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
 
-
 def unregister():
-    bpy.utils.unregister_class(MakeAtom)
-    bpy.utils.unregister_class(CreateArrow) 
-    bpy.utils.unregister_class(CreatorPanel)
-    bpy.utils.unregister_class(ImportCML)
-    bpy.utils.unregister_class(ToggleLonePairs)
+
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
     
     del bpy.types.Scene.lone_pair
@@ -1065,8 +1315,10 @@ def unregister():
     del bpy.types.Scene.bond_order
     del bpy.types.Scene.atom_choice
     del bpy.types.Scene.line_thickness
-    bpy.utils.unregister_class(MakeBond)
-    bpy.utils.unregister_class(BondOrder)
+    del bpy.types.Scene.bond_influence_property
+
+    for class_ in classes:
+        bpy.utils.unregister_class(class_)
 
 
 if __name__ == "__main__":
