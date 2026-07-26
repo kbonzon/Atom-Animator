@@ -436,11 +436,16 @@ class SetBond(bpy.types.Operator):
         return {'FINISHED'} if bonds_set else {'CANCELLED'}
 
 
-def flip_aromatic_drawing(bond, grease_pencil, frame_number):
-    """Move an aromatic inner stroke to the opposite side on local Z."""
-    if get_bond_order(bond) != 2:
-        return f"{bond.name} is not a double aromatic bond"
+AROMATIC_OUTER_POINTS = ((0, 0, 0), (1, 0, 0))
 
+
+def set_or_flip_aromatic_drawing(
+    bond,
+    grease_pencil,
+    frame_number,
+    aromatic_inner_offsets=((0, -0.2, -0.15), (0, 0.2, -0.15)),
+):
+    """Set a bond to aromatic, or flip it if it is already aromatic."""
     active_layer = grease_pencil.data.layers.active
     if active_layer is None:
         return f"{grease_pencil.name} has no active layer"
@@ -449,12 +454,72 @@ def flip_aromatic_drawing(bond, grease_pencil, frame_number):
     if current_frame is None:
         return f"{grease_pencil.name} has no Grease Pencil frame to copy"
 
-    if len(current_frame.strokes) != 2:
-        return f"{grease_pencil.name} does not have two aromatic strokes"
+    if not current_frame.strokes:
+        return f"{grease_pencil.name} has no stroke to copy"
 
-    inner_stroke = current_frame.strokes[1]
-    for inner_point in inner_stroke.points:
-        inner_point.co.z = -inner_point.co.z
+    outer_stroke = current_frame.strokes[0]
+    if len(outer_stroke.points) != len(AROMATIC_OUTER_POINTS):
+        return (
+            f"{grease_pencil.name} needs {len(AROMATIC_OUTER_POINTS)} "
+            "points for an aromatic stroke"
+        )
+
+    # Only treat the current drawing as aromatic when both its canonical outer
+    # stroke and its inner-stroke offsets match.
+    is_aromatic = all(
+        (point.co - Vector(expected)).length <= 1e-4
+        for point, expected in zip(
+            outer_stroke.points, AROMATIC_OUTER_POINTS
+        )
+    ) and len(current_frame.strokes) == 2
+    if is_aromatic:
+        inner_stroke = current_frame.strokes[1]
+        is_aromatic = len(inner_stroke.points) == len(aromatic_inner_offsets)
+
+    if is_aromatic:
+        for outer_point, inner_point, offset in zip(
+            outer_stroke.points,
+            inner_stroke.points,
+            aromatic_inner_offsets,
+        ):
+            difference = inner_point.co - outer_point.co
+            expected = Vector(offset)
+            if (
+                abs(difference.x - expected.x) > 1e-4
+                or abs(difference.y - expected.y) > 1e-4
+                or abs(abs(difference.z) - abs(expected.z)) > 1e-4
+            ):
+                is_aromatic = False
+                break
+
+    if is_aromatic:
+        # Reflect the inner line around the outer line, rather than around
+        # world/local zero, so bonds moved by Set Bond keep their spacing.
+        for outer_point, inner_point in zip(
+            outer_stroke.points, inner_stroke.points
+        ):
+            relative_z = inner_point.co.z - outer_point.co.z
+            inner_point.co.z = outer_point.co.z - relative_z
+    else:
+        for outer_point, coordinates in zip(
+            outer_stroke.points, AROMATIC_OUTER_POINTS
+        ):
+            outer_point.co = Vector(coordinates)
+
+        set_stroke_count(grease_pencil, current_frame, 2)
+        inner_stroke = current_frame.strokes[1]
+        for outer_point, inner_point, offset in zip(
+            outer_stroke.points,
+            inner_stroke.points,
+            aromatic_inner_offsets,
+        ):
+            inner_point.co = outer_point.co + Vector(offset)
+
+        current_order = get_bond_order(bond)
+        if current_order is None:
+            return f"Could not read bond order from {bond.name}"
+        if current_order != 2:
+            bond.name = bond.name[:-1] + "2"
 
     grease_pencil.data.update_tag()
     return None
@@ -462,7 +527,7 @@ def flip_aromatic_drawing(bond, grease_pencil, frame_number):
 
 class FlipAromatic(bpy.types.Operator):
     bl_idname = "object.flip_aromatic"
-    bl_label = "Flip Aromatic"
+    bl_label = "Draw / Flip Aromatic"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -472,7 +537,8 @@ class FlipAromatic(bpy.types.Operator):
             return {'CANCELLED'}
 
         frame_number = context.scene.frame_current
-        bonds_flipped = 0
+        line_thickness = context.scene.line_thickness_data.line_thickness
+        bonds_changed = 0
 
         for i in range(0, len(selected_objects) - 1, 2):
             atom1 = selected_objects[i]
@@ -480,10 +546,17 @@ class FlipAromatic(bpy.types.Operator):
             bond = find_bond_between(atom1, atom2)
 
             if bond is None:
-                self.report(
-                    {'WARNING'},
-                    f"No bond found between {atom1.name} and {atom2.name}"
+                bond_name = f"{atom1.name}_{atom2.name}_aromatic"
+                addBond(
+                    atom1.name,
+                    atom2.name,
+                    bond_name,
+                    2,
+                    thickness=line_thickness,
+                    aromatic=True,
+                    frame_number=frame_number,
                 )
+                bonds_changed += 1
                 continue
 
             grease_pencil = find_bond_grease_pencil(bond)
@@ -491,16 +564,16 @@ class FlipAromatic(bpy.types.Operator):
                 self.report({'WARNING'}, f"No Grease Pencil found for {bond.name}")
                 continue
 
-            error = flip_aromatic_drawing(
+            error = set_or_flip_aromatic_drawing(
                 bond, grease_pencil, frame_number
             )
             if error is not None:
                 self.report({'WARNING'}, error)
                 continue
 
-            bonds_flipped += 1
+            bonds_changed += 1
 
-        return {'FINISHED'} if bonds_flipped else {'CANCELLED'}
+        return {'FINISHED'} if bonds_changed else {'CANCELLED'}
 
 
 class ToggleVisibility(bpy.types.Operator):
@@ -1294,6 +1367,7 @@ def addBond(
     thickness=50,
     aromatic=False,
     aromatic_inner_offsets=((0, -0.2, -0.15), (0, 0.2, -0.15)),
+    frame_number=None,
 ):
     is_debug = atom1 == "a31reactants_2"
     if is_debug:
@@ -1350,7 +1424,9 @@ def addBond(
     
     gpencil_layer = gp_data.layers.new(name, set_active=True)
     gpencil_layer.location[2] = -0.1
-    frame = gpencil_layer.frames.new(bpy.context.scene.frame_current)
+    if frame_number is None:
+        frame_number = bpy.context.scene.frame_current
+    frame = gpencil_layer.frames.new(frame_number)
     if is_debug:
         print(f"Adding bond for {atom1} and {atom2} made new frame")
     if order <= 1:
@@ -1387,7 +1463,17 @@ def addBond(
     if aromatic and order == 2:
         # Duplicate the auto-weighted outer stroke so both aromatic lines deform
         # identically, then offset each duplicate point independently.
-        inner_stroke = add_weighted_stroke(gp_object, frame, frame.strokes[0])
+        outer_stroke = frame.strokes[0]
+        if len(outer_stroke.points) != len(AROMATIC_OUTER_POINTS):
+            raise ValueError(
+                "An aromatic outer stroke must contain exactly two points"
+            )
+        for point, coordinates in zip(
+            outer_stroke.points, AROMATIC_OUTER_POINTS
+        ):
+            point.co = Vector(coordinates)
+
+        inner_stroke = add_weighted_stroke(gp_object, frame, outer_stroke)
         if len(aromatic_inner_offsets) != len(inner_stroke.points):
             raise ValueError(
                 "aromatic_inner_offsets must contain one Vector3 per stroke point"
