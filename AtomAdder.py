@@ -1,8 +1,8 @@
 bl_info = {
-    "name": "Compound Creator",
+    "name": "Atom Animator",
     "author": "Tim Bonzon",
     "version": (1.4, 1.4),
-    "blender": (3, 50, 0),
+    "blender": (3, 5, 0),
     "location": "View3d > Toolbar",
     "description": "Adds a chemical compound from CML file",
     "warning": "",
@@ -10,10 +10,10 @@ bl_info = {
     "category": "Add Mesh",
 }
 
-#TODO: Add the ability to make charges
+#TODO: Add the ability to make charges [DONE]
 #TODO: Make bond constraints its own slider [DONE]
 #TODO: Add animatable visibility [DONE]
-#TODO: Handle aromatic bond drawing
+#TODO: Handle aromatic bond drawing [DONE]
 
 import bpy
 import math
@@ -27,7 +27,6 @@ from bpy.props import IntProperty, PointerProperty, FloatProperty
 # ImportHelper is a helper class, defines filename and
 # invoke() function which calls the file selector.
 from bpy_extras.io_utils import ImportHelper
-from bpy.types import GPencilFrame
 from bpy.props import StringProperty, BoolProperty, EnumProperty
 from bpy.types import Operator
 
@@ -124,6 +123,7 @@ class AddCharge (bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
+        frame = context.scene.frame_current
 
         selected_objects = context.selected_objects
 
@@ -133,31 +133,63 @@ class AddCharge (bpy.types.Operator):
         
         charge = context.scene.charge_choice_data.charge
 
-        for object in selected_objects:
-            #Create a text object
-            t = bpy.data.curves.new(name=object.name+"_chargedata_"+charge, type="FONT")
-            t.offset_x = 0.385
-            t.offset_y = 0.185
-            t.size = 0.5
-            t.materials.append(addBlackMaterial())
-            t.align_x = "CENTER"
-            t.align_y = "CENTER"
-            t.size = 0.25
-            t.body = charge
-            atom_collection = object.users_collection[0]
+        tmp = "_charge_"+charge
 
-            t_o = bpy.data.objects.new(object.name+"_charge_"+charge, t)
-            #t_o.location = [object.location.x, object.location.y, 0]
-            t_o.parent = object
-            atom_collection.objects.link(t_o)
+
+        for object in selected_objects:
+            doesnotexist = True
+
+            #Disabling all other charges:
+            for child in object.children:
+                if tmp in child.name:
+                    doesnotexist = False
+                    break
+
+                if "_charge_" in child.name and tmp not in child.name:
+                    child.hide_render = True
+                    child.hide_viewport = True
+                    child.keyframe_insert(data_path="hide_render", frame=frame)
+                    child.keyframe_insert(data_path="hide_viewport", frame=frame)
+
+            if doesnotexist:
+                #Create a text object
+                t = bpy.data.curves.new(name=object.name+"_chargedata_"+charge, type="FONT")
+                t.offset_x = 0.385
+                t.offset_y = 0.185
+                t.size = 0.5
+                t.materials.append(addBlackMaterial())
+                t.align_x = "CENTER"
+                t.align_y = "CENTER"
+                t.size = 0.25
+                t.body = charge
+                atom_collection = object.users_collection[0]
+
+                #add to collection
+                t_o = bpy.data.objects.new(object.name+"_charge_"+charge, t)
+                #t_o.location = [object.location.x, object.location.y, 0]
+                #keyframe it appearing
+                prev = frame - 1
+                # bpy.context.scene.frame_set(prev)
+                t_o.hide_render = True
+                t_o.hide_viewport = True
+                t_o.keyframe_insert(data_path="hide_render", frame=prev)
+                t_o.keyframe_insert(data_path="hide_viewport", frame=prev)
+                t_o.parent = object
+                t_o.hide_render = False
+                t_o.hide_viewport = False
+                t_o.keyframe_insert(data_path="hide_render", frame=frame)
+                t_o.keyframe_insert(data_path="hide_viewport", frame=frame)
+                atom_collection.objects.link(t_o)
+
+
 
         return {'FINISHED'}
-    
+
 class BondOrder (bpy.types.PropertyGroup):
     order : IntProperty(
         name = "Bond Order",
         description="Bond order for newly created bonds. (1-3)",
-        default=1, min = 1, soft_max=3
+        default=1, min=1, max=3
     )
 
 class LineThickness (bpy.types.PropertyGroup):
@@ -190,6 +222,286 @@ class MakeBond(bpy.types.Operator):
         addBond(atom1, atom2, bond_name, order)
 
         return {'FINISHED'}
+    
+def find_bond_between(atom1, atom2):
+    """Find the armature whose constraints target both atom objects."""
+    for candidate in bpy.data.objects:
+        if candidate.type != 'ARMATURE' or candidate.pose is None:
+            continue
+
+        targets = {
+            constraint.target
+            for bone in candidate.pose.bones
+            for constraint in bone.constraints
+            if getattr(constraint, "target", None) is not None
+        }
+        if atom1 in targets and atom2 in targets:
+            return candidate
+
+    # Support older bonds that do not have the expected constraints.
+    return next((
+        candidate for candidate in bpy.data.objects
+        if candidate.type == 'ARMATURE'
+        and atom1.name in candidate.name
+        and atom2.name in candidate.name
+    ), None)
+
+
+def find_bond_grease_pencil(bond):
+    """Return the Grease Pencil plane parented beneath a bond armature."""
+    return next((
+        child for child in bond.children_recursive
+        if child.type == 'GPENCIL' and "_bondPlane" in child.name_full
+    ), None)
+
+
+def get_bond_order(bond):
+    """Read the bond order from the final character of its name."""
+    try:
+        return int(bond.name[-1])
+    except ValueError:
+        return None
+
+
+def get_point_weights(grease_pencil, stroke, point_index):
+    """Collect all vertex-group weights assigned to a Grease Pencil point."""
+    weights = {}
+    for vertex_group in grease_pencil.vertex_groups:
+        try:
+            weights[vertex_group.index] = stroke.points.weight_get(
+                vertex_group_index=vertex_group.index,
+                point_index=point_index,
+            )
+        except RuntimeError:
+            pass
+    return weights
+
+
+def add_weighted_stroke(grease_pencil, gp_frame, source_stroke):
+    """Duplicate a stroke's point properties and armature weights."""
+    source_data = [
+        (
+            point.co.copy(),
+            point.pressure,
+            point.strength,
+            get_point_weights(grease_pencil, source_stroke, point_index),
+        )
+        for point_index, point in enumerate(source_stroke.points)
+    ]
+
+    new_stroke = gp_frame.strokes.new()
+    new_stroke.display_mode = source_stroke.display_mode
+    new_stroke.line_width = source_stroke.line_width
+    new_stroke.material_index = source_stroke.material_index
+    new_stroke.use_cyclic = source_stroke.use_cyclic
+    new_stroke.points.add(count=len(source_data))
+
+    for point_offset, (new_point, point_data) in enumerate(zip(
+        new_stroke.points, source_data
+    )):
+        co, pressure, strength, weights = point_data
+        new_point.co = co
+        new_point.pressure = pressure
+        new_point.strength = strength
+
+        for group_index, weight in weights.items():
+            new_stroke.points.weight_set(
+                vertex_group_index=group_index,
+                point_index=point_offset,
+                weight=weight,
+            )
+
+    return new_stroke
+
+
+def set_stroke_count(grease_pencil, gp_frame, count):
+    """Resize a bond drawing while preserving weights on added strokes."""
+    while len(gp_frame.strokes) < count:
+        add_weighted_stroke(grease_pencil, gp_frame, gp_frame.strokes[0])
+
+    while len(gp_frame.strokes) > count:
+        gp_frame.strokes.remove(gp_frame.strokes[-1])
+
+
+def position_bond_strokes(gp_frame, order):
+    """Place the bond lines symmetrically around the bond center."""
+    offsets = {
+        1: (0.0,),
+        2: (-0.1, 0.1),
+        3: (-0.15, 0.0, 0.15),
+    }[order]
+
+    for stroke, offset in zip(gp_frame.strokes, offsets):
+        for point in stroke.points:
+            point.co = Vector((
+                point.co.x,
+                point.co.y,
+                offset,
+            ))
+
+
+def get_or_create_gp_frame(layer, frame_number):
+    """Return the frame at frame_number, copying the held frame if needed."""
+    current_frame = next((
+        gp_frame for gp_frame in layer.frames
+        if gp_frame.frame_number == frame_number
+    ), None)
+    if current_frame is not None:
+        return current_frame
+
+    previous_frames = [
+        gp_frame for gp_frame in layer.frames
+        if gp_frame.frame_number < frame_number
+    ]
+    if previous_frames:
+        source_frame = max(previous_frames, key=lambda item: item.frame_number)
+    elif layer.frames:
+        source_frame = min(layer.frames, key=lambda item: item.frame_number)
+    else:
+        return None
+
+    current_frame = layer.frames.copy(source_frame)
+    current_frame.frame_number = frame_number
+    return current_frame
+
+
+def set_bond_drawing_order(bond, grease_pencil, frame_number, order):
+    """Set one bond's drawing order, returning an error message on failure."""
+    current_order = get_bond_order(bond)
+    if current_order is None:
+        return f"Could not read bond order from {bond.name}"
+
+    active_layer = grease_pencil.data.layers.active
+    if active_layer is None:
+        return f"{grease_pencil.name} has no active layer"
+
+    current_frame = get_or_create_gp_frame(active_layer, frame_number)
+    if current_frame is None:
+        return f"{grease_pencil.name} has no Grease Pencil frame to copy"
+
+    if not current_frame.strokes:
+        return f"{grease_pencil.name} has no stroke to copy"
+
+    set_stroke_count(grease_pencil, current_frame, order)
+    position_bond_strokes(current_frame, order)
+
+    if current_order != order:
+        bond.name = bond.name[:-1] + str(order)
+
+    grease_pencil.data.update_tag()
+    return None
+
+
+class SetBond(bpy.types.Operator):
+    bl_idname = "object.set_bond"
+    bl_label = "Set Bond"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        selected_objects = context.selected_objects
+        if len(selected_objects) < 2:
+            self.report({'ERROR'}, "Select at least two atoms")
+            return {'CANCELLED'}
+
+        order = context.scene.bond_order.order
+        frame_number = context.scene.frame_current
+        bonds_set = 0
+
+        for i in range(0, len(selected_objects) - 1, 2):
+            atom1 = selected_objects[i]
+            atom2 = selected_objects[i + 1]
+            bond = find_bond_between(atom1, atom2)
+
+            if bond is None:
+                self.report(
+                    {'WARNING'},
+                    f"No bond found between {atom1.name} and {atom2.name}"
+                )
+                continue
+
+            grease_pencil = find_bond_grease_pencil(bond)
+            if grease_pencil is None:
+                self.report({'WARNING'}, f"No Grease Pencil found for {bond.name}")
+                continue
+
+            error = set_bond_drawing_order(
+                bond, grease_pencil, frame_number, order
+            )
+            if error is not None:
+                self.report({'WARNING'}, error)
+                continue
+
+            bonds_set += 1
+
+        return {'FINISHED'} if bonds_set else {'CANCELLED'}
+
+
+def flip_aromatic_drawing(bond, grease_pencil, frame_number):
+    """Move an aromatic inner stroke to the opposite side on local Z."""
+    if get_bond_order(bond) != 2:
+        return f"{bond.name} is not a double aromatic bond"
+
+    active_layer = grease_pencil.data.layers.active
+    if active_layer is None:
+        return f"{grease_pencil.name} has no active layer"
+
+    current_frame = get_or_create_gp_frame(active_layer, frame_number)
+    if current_frame is None:
+        return f"{grease_pencil.name} has no Grease Pencil frame to copy"
+
+    if len(current_frame.strokes) != 2:
+        return f"{grease_pencil.name} does not have two aromatic strokes"
+
+    inner_stroke = current_frame.strokes[1]
+    for inner_point in inner_stroke.points:
+        inner_point.co.z = -inner_point.co.z
+
+    grease_pencil.data.update_tag()
+    return None
+
+
+class FlipAromatic(bpy.types.Operator):
+    bl_idname = "object.flip_aromatic"
+    bl_label = "Flip Aromatic"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        selected_objects = context.selected_objects
+        if len(selected_objects) < 2:
+            self.report({'ERROR'}, "Select at least two atoms")
+            return {'CANCELLED'}
+
+        frame_number = context.scene.frame_current
+        bonds_flipped = 0
+
+        for i in range(0, len(selected_objects) - 1, 2):
+            atom1 = selected_objects[i]
+            atom2 = selected_objects[i + 1]
+            bond = find_bond_between(atom1, atom2)
+
+            if bond is None:
+                self.report(
+                    {'WARNING'},
+                    f"No bond found between {atom1.name} and {atom2.name}"
+                )
+                continue
+
+            grease_pencil = find_bond_grease_pencil(bond)
+            if grease_pencil is None:
+                self.report({'WARNING'}, f"No Grease Pencil found for {bond.name}")
+                continue
+
+            error = flip_aromatic_drawing(
+                bond, grease_pencil, frame_number
+            )
+            if error is not None:
+                self.report({'WARNING'}, error)
+                continue
+
+            bonds_flipped += 1
+
+        return {'FINISHED'} if bonds_flipped else {'CANCELLED'}
+
 
 class ToggleVisibility(bpy.types.Operator):
     bl_idname = "object.disable_atom"
@@ -704,10 +1016,6 @@ class ToggleLonePairs(bpy.types.Operator):
             if obj_lps == 0:
                 self.handleLonePairs(obj, context.scene.collection, context, obj_lps, thickness=line_thickness)
 
-
-                
-
-
         return {'FINISHED'}
 
 class AtomChoice (bpy.types.PropertyGroup):
@@ -764,7 +1072,7 @@ class CreatorPanel(bpy.types.Panel):
         row.operator("import_cml.compound_data",icon='OUTLINER_DATA_POINTCLOUD')
         
         row = layout.row()
-        layout.label(text="Generate arrow")
+        layout.label(text="Reactivity")
         layout.operator("object.generate_arrow", icon="TRACKING_REFINE_FORWARDS")
         
         row = layout.row()
@@ -772,6 +1080,8 @@ class CreatorPanel(bpy.types.Panel):
         props = context.scene.bond_order
         layout.prop(props, "order")
         layout.operator("object.generate_bond", icon="ACTION")
+        layout.operator("object.set_bond", icon="GREASEPENCIL")
+        layout.operator("object.flip_aromatic", icon="ARROW_LEFTRIGHT")
         row=layout.row()
         props = context.scene.bond_influence_property
         layout.prop(props, "influence")
@@ -976,10 +1286,20 @@ def draw_line(gp_frame, p0 : tuple, p1 : tuple):
     gp_stroke.points[1].co = p1 
     return gp_stroke
 
-def addBond(atom1, atom2, name, order, thickness=50, aromatic=False):
+def addBond(
+    atom1,
+    atom2,
+    name,
+    order,
+    thickness=50,
+    aromatic=False,
+    aromatic_inner_offsets=((0, -0.2, -0.15), (0, 0.2, -0.15)),
+):
     is_debug = atom1 == "a31reactants_2"
     if is_debug:
         print(f"Adding bond for {atom1} and {atom2}")
+    if aromatic:
+        print(f"Drawing aromatic bond {name}: {atom1} to {atom2} (order {order})")
 
      #grabbing the master collection
     
@@ -1033,17 +1353,20 @@ def addBond(atom1, atom2, name, order, thickness=50, aromatic=False):
     frame = gpencil_layer.frames.new(bpy.context.scene.frame_current)
     if is_debug:
         print(f"Adding bond for {atom1} and {atom2} made new frame")
-    #Handling higher order bonds by drawing them off center
-    if order <= 1: 
-        draw_line(frame, (0,0,0),(1,0,0))
+    if order <= 1:
+        draw_line(frame, (0, 0, 0), (1, 0, 0))
     else:
+        # Separate higher-order bonds along the drawing plane's Z axis.
         if order == 2:
-            draw_line(frame, (0,0,-0.1),(1,0,-0.1))
-            draw_line(frame, (0,0,0.1),(1,0,0.1))
-        if order ==3:
-            draw_line(frame, (0,0,-0.15),(1,0,-0.15))
-            draw_line(frame, (0,0,0),(1,0,0))
-            draw_line(frame, (0,0,0.15),(1,0,0.15))
+            if aromatic:
+                draw_line(frame, (0, 0, 0), (1, 0, 0))
+            else:
+                draw_line(frame, (0, 0, -0.1), (1, 0, -0.1))
+                draw_line(frame, (0, 0, 0.1), (1, 0, 0.1))
+        else:
+            draw_line(frame, (0, 0, -0.15), (1, 0, -0.15))
+            draw_line(frame, (0, 0, 0), (1, 0, 0))
+            draw_line(frame, (0, 0, 0.15), (1, 0, 0.15))
     
     if is_debug:
         print(f"Adding bond for {atom1} and {atom2} drew line")
@@ -1060,6 +1383,17 @@ def addBond(atom1, atom2, name, order, thickness=50, aromatic=False):
     bondArma.select_set(True)
     bondPlane.select_set(True)
     bpy.ops.object.parent_set(type='ARMATURE_AUTO', keep_transform=True)
+
+    if aromatic and order == 2:
+        # Duplicate the auto-weighted outer stroke so both aromatic lines deform
+        # identically, then offset each duplicate point independently.
+        inner_stroke = add_weighted_stroke(gp_object, frame, frame.strokes[0])
+        if len(aromatic_inner_offsets) != len(inner_stroke.points):
+            raise ValueError(
+                "aromatic_inner_offsets must contain one Vector3 per stroke point"
+            )
+        for point, offset in zip(inner_stroke.points, aromatic_inner_offsets):
+            point.co += Vector(offset)
     
     if is_debug:
         print(f"Adding bond for {atom1} and {atom2} parented bond plane")
@@ -1116,21 +1450,75 @@ def addBond(atom1, atom2, name, order, thickness=50, aromatic=False):
     track_to2.track_axis = "TRACK_Y"
     print(f"Added bond {atom1} to {atom2}")
 
-#TODO: implement this
-def aromatic_atoms(atoms):
-    data = atoms[0]
-    atoms.pop(0)
-    atom1_tmp = data.split("atomRefs2=\"", 1)
+def get_bond(line):
+    #First, find the atoms involved in the bond
+    atom1_tmp = line.split("atomRefs2=\"", 1)
     atom1_tmp2 = atom1_tmp[1].split()
     atom1 = atom1_tmp2[0]
     
-    atom2_tmp = data.split("\" i", 1)
+    atom2_tmp = line.split("\" i", 1)
     atom2_tmp2 = atom2_tmp[0].split()
     atom2_tmp3 = atom1_tmp2[1].split("\"",1)
     atom2 = atom2_tmp3[0]
+    
+    #Second, find the name of the bond
+    
+    bname_tmp = line.split("id=\"",1)
+    bname_tmp2 = bname_tmp[1].split("\"",1)
+    bname = bname_tmp2[0]
+    
+    #Third, find the bond order
+    
+    order_tmp = line.split("order=\"",1)
+    order_tmp2 = order_tmp[1].split("\"/",1)
+    order = order_tmp2[0]
 
-    #get atom 1
-    #get atom 2
+    return (atom1, atom2, order)
+
+#Have it read the lines in a CML file and determine
+#What atoms are aromatic. Aromatic atoms are cycles. 
+#I believe an undirected graph needs to be built.
+#Have it return a list of bonds that are aromatic.
+def get_aromaticatoms(cml_file):
+    bond_atoms = [get_bond(line) for line in cml_file]
+    if len(bond_atoms) < 3:
+        return []
+
+    graph = {}
+    for edge_id, (atom1, atom2, _) in enumerate(bond_atoms):
+        graph.setdefault(atom1, []).append((atom2, edge_id))
+        graph.setdefault(atom2, []).append((atom1, edge_id))
+
+    discovery = {}
+    low = {}
+    bridges = set()
+    time = 0
+
+    def find_bridges(atom, parent_edge=-1):
+        nonlocal time
+        discovery[atom] = low[atom] = time
+        time += 1
+
+        for neighbor, edge_id in graph[atom]:
+            if edge_id == parent_edge:
+                continue
+            if neighbor not in discovery:
+                find_bridges(neighbor, edge_id)
+                low[atom] = min(low[atom], low[neighbor])
+                if low[neighbor] > discovery[atom]:
+                    bridges.add(edge_id)
+            else:
+                low[atom] = min(low[atom], discovery[neighbor])
+
+    for atom in graph:
+        if atom not in discovery:
+            find_bridges(atom)
+
+    return [bond for edge_id, bond in enumerate(bond_atoms)
+            if edge_id not in bridges]
+
+
+
     #get atom 3
     #check if atom 3 bond to atom 1
     #if yes, return atoms 1-3
@@ -1219,6 +1607,14 @@ def read_cml_file(context, filepath):
             addAtom(x_pos, y_pos,atom,id+fname)
             print(x_pos, " ,", y_pos)
 
+        # CML commonly represents aromatic rings as alternating bond orders.
+        aromatic_bonds = {
+            frozenset((atom1, atom2))
+            for atom1, atom2, _ in get_aromaticatoms(bond_lines)
+        }
+        print(f"Detected {len(aromatic_bonds)} bonds in aromatic cycles")
+
+        aromatic_bond_index = 0
         for data in bond_lines:
             #First, find the atoms involved in the bond
             atom1_tmp = data.split("atomRefs2=\"", 1)
@@ -1241,9 +1637,16 @@ def read_cml_file(context, filepath):
             order_tmp = data.split("order=\"",1)
             order_tmp2 = order_tmp[1].split("\"/",1)
             order = order_tmp2[0]
+            aromatic = (order.upper() == "A" or
+                        frozenset((atom1_tmp2[0], atom2_tmp3[0])) in aromatic_bonds)
+            print(f"CML bond {bname}: raw order={order!r}, aromatic={aromatic}")
+            if aromatic:
+                # Alternate the visible bond order around aromatic systems.
+                order = 2 if aromatic_bond_index % 2 == 0 else 1
+                aromatic_bond_index += 1
             
-            print("bonds at " + atom1 + " " + atom2 + " name " + bname + " order " + order)
-            addBond(atom1, atom2, bname, int(order))
+            print(f"bonds at {atom1} {atom2} name {bname} order {order}")
+            addBond(atom1, atom2, bname, int(order), aromatic=aromatic)
 
 
 
@@ -1281,7 +1684,9 @@ classes = (
     LineThickness,
     ToggleLonePairs,
     ToggleVisibility,
-    BondInfluenceProperty
+    BondInfluenceProperty,
+    SetBond,
+    FlipAromatic
 )
 
 # Register and add to the "file selector" menu (required to use F3 search "Text Import Operator" for quick access)
@@ -1307,19 +1712,16 @@ def register():
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
 
 def unregister():
-
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
-    
-    del bpy.types.Scene.lone_pair
-    del bpy.types.Scene.lone_pair_selected
-    del bpy.types.Scene.bond_order
+
     del bpy.types.Scene.atom_choice
-    del bpy.types.Scene.line_thickness
+    del bpy.types.Scene.bond_order
+    del bpy.types.Scene.line_thickness_data
+    del bpy.types.Scene.charge_choice_data
     del bpy.types.Scene.bond_influence_property
 
-    for class_ in classes:
+    for class_ in reversed(classes):
         bpy.utils.unregister_class(class_)
-
 
 if __name__ == "__main__":
     register()
