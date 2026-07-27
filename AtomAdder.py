@@ -732,7 +732,7 @@ class CreateArrow(bpy.types.Operator):
         vanish_mod = gp_object.grease_pencil_modifiers.new(name="Arrow_Vanish", type='GP_BUILD')
         vanish_mod.mode = 'SEQUENTIAL'
         vanish_mod.transition = 'FADE'
-        vanish_mod.start_delay = 10  # Delay after first build
+        vanish_mod.start_delay = 20  # Delay after first build
         vanish_mod.length = 10  # Duration in frames
         
         self.report({"INFO"}, "Arrow created")
